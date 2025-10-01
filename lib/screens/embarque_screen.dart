@@ -1,4 +1,44 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+
+// Model classes for the catalog data
+class Almacen {
+  final int id;
+  final String nombre;
+  Almacen({required this.id, required this.nombre});
+
+  factory Almacen.fromJson(Map<String, dynamic> json) {
+    final idValue = json['idalmacen'];
+    return Almacen(
+      id: idValue is int ? idValue : int.tryParse(idValue.toString()) ?? 0,
+      nombre: json['nombre_almacen'],
+    );
+  }
+}
+
+class Unidad {
+  final int id;
+  final String nombre;
+  Unidad({required this.id, required this.nombre});
+
+  factory Unidad.fromJson(Map<String, dynamic> json) {
+    final idValue = json['idunidad'];
+    return Unidad(
+      id: idValue is int ? idValue : int.tryParse(idValue.toString()) ?? 0,
+      nombre: json['nombre_unidad'],
+    );
+  }
+}
+
+class Producto {
+  final int id;
+  final String nombre;
+  final double precioStock;
+
+  Producto({required this.id, required this.nombre, required this.precioStock});
+}
+
 
 class EmbarqueScreen extends StatefulWidget {
   const EmbarqueScreen({super.key});
@@ -8,42 +48,90 @@ class EmbarqueScreen extends StatefulWidget {
 }
 
 class _EmbarqueScreenState extends State<EmbarqueScreen> {
-  // --- Catálogos (mock). Puedes sustituir por tus fuentes reales ---
-  final List<String> almacenes = const ['Almacén Central', 'Almacén Norte'];
-  final List<String> almacenistas = const ['Arturo Gómez', 'María Pérez'];
-  final List<Map<String, dynamic>> unidadesCompletas = const [
-    {'idunidad': 1, 'unidad': 'kg'},
-    {'idunidad': 2, 'unidad': 'm'},
-    {'idunidad': 3, 'unidad': 'lb'},
-    {'idunidad': 4, 'unidad': 'pz'},
-    {'idunidad': 5, 'unidad': 'caja'},
-  ];
+  // --- Catalogos (dinamicos) ---
+  List<Almacen> _almacenes = [];
+  List<Unidad> _unidades = [];
+  bool _isLoading = true;
 
-  // Clientes "verdaderos"
-  final List<String> clientes = const [
-    'Walmart',
-    'OXXO',
-    'Chedraui',
-    'Soriana',
-    'Bodega Aurrera',
+  // Mock data for other dropdowns until their APIs are ready
+  final List<String> almacenistas = const ['Arturo Gómez', 'María Pérez'];
+  final List<String> clientes = const ['Walmart', 'OXXO', 'Chedraui'];
+
+  // --- NUEVOS CATALOGOS DE EJEMPLO ---
+  final List<String> camiones = const ['Triton #1 - Juan Perez', 'Torton #5 - Miguel Lopez', 'Camioneta #2 - Luis Angel'];
+  final List<String> tiposDeMovimiento = const ['Entrada a Bodega', 'Salida a Cliente', 'Traspaso entre Almacenes'];
+
+  // --- CATALOGO DE PRODUCTOS DE EJEMPLO (Paso 2) ---
+  final List<Producto> _productosDeEjemplo = [
+    Producto(id: 101, nombre: 'Cemento Gris 50kg', precioStock: 250.00),
+    Producto(id: 102, nombre: 'Varilla 3/8"', precioStock: 180.50),
+    Producto(id: 103, nombre: 'Arena Fina m³', precioStock: 450.00),
+    Producto(id: 104, nombre: 'Grava 3/4 m³', precioStock: 480.00),
+    Producto(id: 105, nombre: 'Pintura Vinílica 19L', precioStock: 950.00),
   ];
 
   // --- Estado de filtros/encabezado ---
-  String? almacen;
+  int? _selectedAlmacenId;
   String? almacenista;
-  String? unidad; // para el alta de producto
+  int? _selectedUnidadId;
   String? cliente;
 
+  // --- NUEVOS CAMPOS REQUERIDOS POR JUNTA ---
+  String? _selectedCamion;
+  String? _selectedTipoMovimiento;
+  final TextEditingController _cancelacionCtrl = TextEditingController();
+
+  // --- ESTADO PARA NUEVA SELECCION DE PRODUCTOS ---
+  Producto? _selectedProducto;
+
   // --- Controles para agregar producto ---
-  final TextEditingController productoCtrl = TextEditingController();
-  final TextEditingController precioCtrl = TextEditingController(text: '0.00');
   final TextEditingController cantidadCtrl = TextEditingController(text: '1');
 
   // --- Lista de renglones en la tabla ---
-  final List<Map<String, dynamic>> filas = []; // {cod, cantidad, unidad, producto, precio}
+  final List<Map<String, dynamic>> filas = [];
 
-  // Helpers
-  List<String> get unidades => unidadesCompletas.map((e) => e['unidad'] as String).toList();
+  @override
+  void initState() {
+    super.initState();
+    _fetchCatalogos();
+  }
+
+  @override
+  void dispose() {
+    _cancelacionCtrl.dispose();
+    cantidadCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _fetchCatalogos() async {
+    setState(() { _isLoading = true; });
+    try {
+      final responses = await Future.wait([
+        http.get(Uri.parse('https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/api_almacenes.php')),
+        http.get(Uri.parse('https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/api_unidades.php')),
+      ]);
+
+      if (mounted) { // Check if the widget is still in the tree
+        if (responses[0].statusCode == 200) {
+          final List<dynamic> data = json.decode(responses[0].body);
+          _almacenes = data.map((json) => Almacen.fromJson(json)).toList();
+        } else {
+          throw Exception('Failed to load almacenes');
+        }
+
+        if (responses[1].statusCode == 200) {
+          final List<dynamic> data = json.decode(responses[1].body);
+          _unidades = data.map((json) => Unidad.fromJson(json)).toList();
+        } else {
+          throw Exception('Failed to load unidades');
+        }
+      }
+    } catch (e) {
+       if (mounted) _snack('Error al cargar catálogos: $e', color: Colors.red);
+    } finally {
+      if (mounted) setState(() { _isLoading = false; });
+    }
+  }
 
   void _snack(String msg, {Color color = Colors.black87}) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -53,34 +141,60 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
 
   String _nextCodigo() {
     final next = filas.length + 1;
-    return next.toString().padLeft(3, '0'); // 001, 002, ...
+    return next.toString().padLeft(3, '0');
   }
 
   void _agregarFila() {
-    if (almacen == null || almacenista == null || unidad == null || cliente == null) {
-      _snack('Completa: Almacén, Almacenista, Unidad y Cliente.', color: Colors.red);
+    // Validaciones de encabezado
+    if (_selectedAlmacenId == null || almacenista == null || _selectedUnidadId == null || cliente == null) {
+      _snack('Completa todos los campos del encabezado.', color: Colors.red);
       return;
     }
-    final nombre = productoCtrl.text.trim();
-    if (nombre.isEmpty) {
-      _snack('Escribe el nombre del producto.', color: Colors.red);
+    
+    // --- NUEVA LOGICA DE AGREGAR PRODUCTO ---
+    if (_selectedProducto == null) {
+      _snack('Selecciona un producto de la lista.', color: Colors.red);
       return;
     }
-    final precio = double.tryParse(precioCtrl.text.replaceAll(',', '.')) ?? 0.0;
+
     int cantidad = int.tryParse(cantidadCtrl.text) ?? 1;
     if (cantidad < 1) cantidad = 1;
+
+    // --- PASO 3: LÓGICA DE PRECIOS DINÁMICOS (EJEMPLO) ---
+    // TODO: Reemplaza esta función con tus reglas de negocio reales.
+    double calcularPrecioFinal() {
+      double precio = _selectedProducto!.precioStock; // Precio base
+      
+      // Ejemplo 1: Descuento porcentual por cliente
+      if (cliente == 'Walmart') {
+        precio *= 0.90; // 10% de descuento
+      } else if (cliente == 'OXXO') {
+        precio *= 0.95; // 5% de descuento
+      }
+
+      // Ejemplo 2: Aumento de costo fijo por almacén
+      final almacenSeleccionado = _almacenes.firstWhere((a) => a.id == _selectedAlmacenId, orElse: () => Almacen(id: 0, nombre: ''));
+      if (almacenSeleccionado.nombre.contains('Cancún')) {
+          precio += 15.0; // Costo extra de $15 por logística en Cancún
+      }
+
+      return precio;
+    }
+
+    final precioFinal = calcularPrecioFinal();
 
     setState(() {
       filas.add({
         'cod': _nextCodigo(),
         'cantidad': cantidad,
-        'unidad': unidad,
-        'producto': nombre,
-        'precio': precio,
+        'unidad': _unidades.firstWhere((u) => u.id == _selectedUnidadId, orElse: () => Unidad(id: 0, nombre: 'N/A')).nombre,
+        'producto': _selectedProducto!.nombre,
+        'precio': precioFinal,
+        'idproducto': _selectedProducto!.id, // Guardamos el ID para el envío
       });
-      // limpiar campos de captura
-      productoCtrl.clear();
-      precioCtrl.text = '0.00';
+      
+      // Limpiar controles
+      _selectedProducto = null;
       cantidadCtrl.text = '1';
     });
   }
@@ -95,7 +209,6 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
   void _eliminar(int index) {
     setState(() {
       filas.removeAt(index);
-      // reenumerar códigos para que sigan consecutivos
       for (int i = 0; i < filas.length; i++) {
         filas[i]['cod'] = (i + 1).toString().padLeft(3, '0');
       }
@@ -107,13 +220,99 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
         (sum, f) => sum + (f['cantidad'] as int) * (f['precio'] as double),
       );
 
-  // UI ----------------------------------------------------------------
+  Future<void> _guardarEmbarqueEnServidor() async {
+    // Use the selected IDs directly
+    final idalmacen = _selectedAlmacenId;
+    final idunidad = _selectedUnidadId;
+    
+    // These are still based on mock data
+    final idalmacenista = almacenistas.indexOf(almacenista!) + 1;
+    final idcliente = clientes.indexOf(cliente!) + 1;
+    
+    if (idalmacen == null ||
+        almacenista == null ||
+        idunidad == null ||
+        cliente == null ||
+        _selectedCamion == null ||
+        _selectedTipoMovimiento == null ||
+        filas.isEmpty) {
+      _snack('Faltan datos de encabezado o no hay productos', color: Colors.red);
+      return;
+    }
+
+    final urlEmbarque = Uri.parse('https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/api_embarques.php');
+    
+    try {
+      final responseEmbarque = await http.post(
+        urlEmbarque,
+        headers: {'Content-Type': 'application/json; charset=UTF-8'},
+        body: jsonEncode({
+          "idalmacen": idalmacen,
+          "idalmacenista": idalmacenista,
+          "idunidad": idunidad,
+          "idcliente": idcliente,
+          "total": total,
+          "camion_chofer": _selectedCamion,
+          "tipo_movimiento": _selectedTipoMovimiento,
+          "motivo_cancelacion": _cancelacionCtrl.text,
+        }),
+      );
+
+      if (responseEmbarque.statusCode == 201) {
+        final Map<String, dynamic> data = json.decode(responseEmbarque.body);
+        final int idembarque = data['idembarque'];
+
+        final urlDetalle = Uri.parse('https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/api_embarque_detalle.php');
+        
+        final List<Map<String, dynamic>> productosPayload = filas.map((fila) => {
+          "idproducto": fila['idproducto'], // <-- CAMBIO CLAVE
+          "cantidad": fila['cantidad'],
+          "precio": fila['precio'],
+        }).toList();
+
+        final responseDetalle = await http.post(
+          urlDetalle,
+          headers: {'Content-Type': 'application/json; charset=UTF-8'},
+          body: jsonEncode({
+            "idembarque": idembarque,
+            "productos": productosPayload,
+          }),
+        );
+        
+        if (responseDetalle.statusCode == 201) {
+          _snack('✅ Embarque guardado exitosamente.', color: Colors.green);
+          setState(() {
+            filas.clear();
+            _selectedAlmacenId = null;
+            almacenista = null;
+            _selectedUnidadId = null;
+            cliente = null;
+            _selectedCamion = null;
+            _selectedTipoMovimiento = null;
+            _cancelacionCtrl.clear();
+          });
+        } else {
+          _snack('❌ Error al guardar detalles: ${responseDetalle.statusCode}', color: Colors.red);
+          print('Respuesta del servidor: ${responseDetalle.body}');
+        }
+      } else {
+        _snack('❌ Error al guardar encabezado: ${responseEmbarque.statusCode}', color: Colors.red);
+        print('Respuesta del servidor: ${responseEmbarque.body}');
+      }
+    } catch (e) {
+      _snack('❌ Error de conexión: $e', color: Colors.red);
+      print('Error: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFE9EDF3),
       body: SafeArea(
-        child: SingleChildScrollView(
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -121,49 +320,71 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
               _Header(),
               const SizedBox(height: 16),
 
-              // Encabezado (4 selects) -> 2 por fila en móvil/tablet, 4 en desktop
+              // Encabezado
               _CardWrap(
                 child: LayoutBuilder(
                   builder: (context, c) {
                     final w = c.maxWidth;
-                    final isPhoneOrTablet = w < 1000; // breakpoint
-                    final cols = isPhoneOrTablet ? 2 : 4;
+                    final isPhone = w < 700;
+                    final isTablet = w >= 700 && w < 1100;
+                    final cols = isPhone ? 2 : 3;
 
                     return GridView.count(
                       crossAxisCount: cols,
                       mainAxisSpacing: 16,
                       crossAxisSpacing: 16,
-                      childAspectRatio: 3.2,
+                      childAspectRatio: isPhone ? 3.2 : (isTablet ? 3.4 : 3.8),
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
                       children: [
-                        _dropdown(
+                        _buildDropdown<int>(
                           label: 'Almacén',
                           icon: Icons.store_mall_directory_outlined,
-                          value: almacen,
-                          items: almacenes,
-                          onChanged: (v) => setState(() => almacen = v),
+                          value: _selectedAlmacenId,
+                          items: _almacenes.map((a) => DropdownMenuItem<int>(value: a.id, child: Text(a.nombre))).toList(),
+                          onChanged: (v) => setState(() => _selectedAlmacenId = v),
                         ),
-                        _dropdown(
+                        _buildDropdown<String>(
                           label: 'Almacenista',
                           icon: Icons.badge_outlined,
                           value: almacenista,
-                          items: almacenistas,
+                          items: almacenistas.map((a) => DropdownMenuItem<String>(value: a, child: Text(a))).toList(),
                           onChanged: (v) => setState(() => almacenista = v),
                         ),
-                        _dropdown(
+                        _buildDropdown<int>(
                           label: 'Unidad',
                           icon: Icons.straighten,
-                          value: unidad,
-                          items: unidades,
-                          onChanged: (v) => setState(() => unidad = v),
+                          value: _selectedUnidadId,
+                          items: _unidades.map((u) => DropdownMenuItem<int>(value: u.id, child: Text(u.nombre))).toList(),
+                          onChanged: (v) => setState(() => _selectedUnidadId = v),
                         ),
-                        _dropdown(
+                        _buildDropdown<String>(
                           label: 'Cliente',
                           icon: Icons.person_outline,
                           value: cliente,
-                          items: clientes,
+                          items: clientes.map((c) => DropdownMenuItem<String>(value: c, child: Text(c))).toList(),
                           onChanged: (v) => setState(() => cliente = v),
+                        ),
+                        _buildDropdown<String>(
+                          label: 'Camión (Chofer)',
+                          icon: Icons.fire_truck_outlined,
+                          value: _selectedCamion,
+                          items: camiones.map((item) => DropdownMenuItem<String>(value: item, child: Text(item))).toList(),
+                          onChanged: (v) => setState(() => _selectedCamion = v),
+                        ),
+                        _buildDropdown<String>(
+                          label: 'Tipo de Movimiento',
+                          icon: Icons.compare_arrows_outlined,
+                          value: _selectedTipoMovimiento,
+                          items: tiposDeMovimiento.map((item) => DropdownMenuItem<String>(value: item, child: Text(item))).toList(),
+                          onChanged: (v) => setState(() => _selectedTipoMovimiento = v),
+                        ),
+                        TextField(
+                          controller: _cancelacionCtrl,
+                          decoration: _inputDeco(
+                            label: 'Motivo Cancelación',
+                            icon: Icons.cancel_outlined,
+                          ),
                         ),
                       ],
                     );
@@ -172,75 +393,68 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
               ),
 
               const SizedBox(height: 16),
-
-              // Captura (Producto + Precio + Cantidad en fila de 3) + botón Agregar debajo
+              
+              // Captura de productos
               _CardWrap(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const _SectionTitle('Producto'),
                     const SizedBox(height: 12),
-
-                    // Fila de 3 SIEMPRE (producto, precio, cantidad)
                     LayoutBuilder(builder: (context, c) {
-                      return GridView.count(
-                        crossAxisCount: 3,
-                        crossAxisSpacing: 16,
-                        mainAxisSpacing: 12,
-                        childAspectRatio: 4.0,
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
+                      final isSmall = c.maxWidth < 500;
+                      return Wrap(
+                        spacing: 16,
+                        runSpacing: 16,
+                        alignment: WrapAlignment.spaceBetween,
+                        crossAxisAlignment: WrapCrossAlignment.end,
                         children: [
-                          TextField(
-                            controller: productoCtrl,
-                            decoration: _inputDeco(
-                              label: 'Producto',
+                          // Dropdown de productos
+                          SizedBox(
+                            width: isSmall ? double.infinity : c.maxWidth * 0.5,
+                            child: _buildDropdown<Producto>(
+                              label: 'Selecciona un Producto',
                               icon: Icons.shopping_basket_outlined,
-                              trailing: IconButton(
-                                onPressed: () => productoCtrl.clear(),
-                                icon: const Icon(Icons.close),
+                              value: _selectedProducto,
+                              items: _productosDeEjemplo.map((p) => DropdownMenuItem<Producto>(
+                                value: p,
+                                child: Text(p.nombre),
+                              )).toList(),
+                              onChanged: (p) => setState(() => _selectedProducto = p),
+                            ),
+                          ),
+                          // Campo de cantidad
+                          SizedBox(
+                            width: isSmall ? double.infinity : c.maxWidth * 0.2,
+                            child: TextField(
+                              controller: cantidadCtrl,
+                              keyboardType: TextInputType.number,
+                              decoration: _inputDeco(
+                                label: 'Cantidad',
+                                icon: Icons.format_list_numbered,
                               ),
                             ),
                           ),
-                          TextField(
-                            controller: precioCtrl,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                            decoration: _inputDeco(
-                              label: 'Precio (P/U)',
-                              icon: Icons.attach_money,
-                            ),
-                          ),
-                          TextField(
-                            controller: cantidadCtrl,
-                            keyboardType: TextInputType.number,
-                            decoration: _inputDeco(
-                              label: 'Cantidad',
-                              icon: Icons.format_list_numbered,
+                          // Botón de agregar
+                          SizedBox(
+                            width: isSmall ? double.infinity : c.maxWidth * 0.2,
+                            child: _primaryButton(
+                              icon: Icons.add_circle_outline,
+                              text: 'Agregar',
+                              background: const Color(0xFF1E3A8A),
+                              onPressed: _agregarFila,
                             ),
                           ),
                         ],
                       );
                     }),
-
-                    const SizedBox(height: 12),
-
-                    // Botón Agregar ancho completo (se mantiene en su posición)
-                    SizedBox(
-                      width: double.infinity,
-                      child: _primaryButton(
-                        icon: Icons.add_circle_outline,
-                        text: 'Agregar',
-                        background: const Color(0xFF1E3A8A), // Indigo 900
-                        onPressed: _agregarFila,
-                      ),
-                    ),
                   ],
                 ),
               ),
 
               const SizedBox(height: 16),
 
-              // Tabla
+              // Tabla de productos
               _CardWrap(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -318,7 +532,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF0F766E), // teal 700
+                        color: const Color(0xFF0F766E),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
@@ -332,11 +546,11 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
 
               const SizedBox(height: 16),
 
-              // Botones de acción (SIEMPRE en fila de 3 horizontal, responsivo)
+              // Botones de acción
               LayoutBuilder(
                 builder: (context, c) {
                   return GridView.count(
-                    crossAxisCount: 3, // siempre tres por fila
+                    crossAxisCount: 3,
                     crossAxisSpacing: 10,
                     mainAxisSpacing: 10,
                     childAspectRatio: 3.6,
@@ -346,22 +560,22 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
                       _actionBtnModern(
                         icon: Icons.save_outlined,
                         text: 'GUARDAR LOCALMENTE',
-                        background: const Color(0xFF6C757D), // gris moderno
+                        background: const Color(0xFF6C757D),
                         border: const Color(0xFF495057),
                         onPressed: () => _snack('Guardado localmente', color: Colors.green),
                       ),
                       _actionBtnModern(
                         icon: Icons.cloud_upload_outlined,
                         text: 'GUARDAR',
-                        background: const Color(0xFF1E3A8A), // indigo 900
-                        border: const Color(0xFF1D4ED8), // indigo 700
-                        onPressed: () => _snack('Guardado en servidor (demo)', color: Colors.blueGrey),
+                        background: const Color(0xFF1E3A8A),
+                        border: const Color(0xFF1D4ED8),
+                        onPressed: _guardarEmbarqueEnServidor,
                       ),
                       _actionBtnModern(
                         icon: Icons.print_outlined,
                         text: 'IMPRIMIR',
-                        background: const Color(0xFF0F766E), // teal 700
-                        border: const Color(0xFF115E59), // teal 800
+                        background: const Color(0xFF0F766E),
+                        border: const Color(0xFF115E59),
                         onPressed: () => _snack('Enviando a impresión (demo)', color: Colors.teal),
                       ),
                     ],
@@ -374,8 +588,6 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
       ),
     );
   }
-
-  // ------- Widgets auxiliares -------
 
   InputDecoration _inputDeco({
     required String label,
@@ -400,14 +612,14 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
     );
   }
 
-  Widget _dropdown({
+  Widget _buildDropdown<T>({
     required String label,
     required IconData icon,
-    required String? value,
-    required List<String> items,
-    required void Function(String?) onChanged,
+    required T? value,
+    required List<DropdownMenuItem<T>> items,
+    required void Function(T?) onChanged,
   }) {
-    return DropdownButtonFormField<String>(
+    return DropdownButtonFormField<T>(
       value: value,
       decoration: InputDecoration(
         labelText: label,
@@ -425,12 +637,11 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
         ),
       ),
       isExpanded: true,
-      items: items.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+      items: items,
       onChanged: onChanged,
     );
   }
 
-  // Botón primario (para "Agregar")
   Widget _primaryButton({
     required IconData icon,
     required String text,
@@ -452,7 +663,6 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
     );
   }
 
-  // Botones de acción con diseño moderno (fila de 3)
   Widget _actionBtnModern({
     required IconData icon,
     required String text,

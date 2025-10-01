@@ -191,7 +191,7 @@ class _PagoScreenState extends State<PagoScreen> with SingleTickerProviderStateM
                   ],
                 ),
               );
-            }).toList(),
+            }),
           const SizedBox(height: 8),
           const Divider(height: 24),
           Row(
@@ -506,7 +506,7 @@ String _formatCurrency(double value) {
     buf.write(chars[i]);
   }
   final wholeFmt = buf.toString().split('').reversed.join();
-  return '${isNegative ? '-' : ''}\$' + wholeFmt + '.$cents';
+  return '${isNegative ? '-' : ''}\$$wholeFmt.$cents';
 }
 
 // =================== COMPROBANTE (NOTIFICACIÓN) ===================

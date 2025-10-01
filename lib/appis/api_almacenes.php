@@ -2,10 +2,12 @@
 header("Access-Control-Allow-Origin: *");
 header("Content-Type: application/json; charset=UTF-8");
 
-$servername = "localhost";
-$username = "root";
-$password = "";
-$dbname = "embarques";
+mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+
+$servername = "srv571.hstgr.io";
+$username = "u203835291_serviceOrder";
+$password = "TritonSrv2025$%";
+$dbname = "u203835291_orders";
 
 $conn = new mysqli($servername, $username, $password, $dbname);
 
@@ -14,18 +16,24 @@ if ($conn->connect_error) {
     die(json_encode(["error" => "Connection failed: " . $conn->connect_error]));
 }
 
-$sql = "SELECT idalmacen, nombre_almacen FROM almacenes WHERE estado = 1 ORDER BY idalmacen ASC";
-$result = $conn->query($sql);
+try {
+    // Consulta corregida: cambié 'almacenes' a 'almacen'
+    $sql = "SELECT idalmacen, nombre_almacen FROM almacen ORDER BY idalmacen ASC";
+    $result = $conn->query($sql);
 
-$almacenes = [];
-if ($result->num_rows > 0) {
-    while($row = $result->fetch_assoc()) {
-        $almacenes[] = $row;
+    $almacenes = [];
+    if ($result->num_rows > 0) {
+        while($row = $result->fetch_assoc()) {
+            $almacenes[] = $row;
+        }
     }
+    http_response_code(200);
+    echo json_encode($almacenes);
+
+} catch (mysqli_sql_exception $e) {
+    http_response_code(500);
+    echo json_encode(["error" => "SQL Error: " . $e->getMessage()]);
 }
 
 $conn->close();
-
-http_response_code(200);
-echo json_encode($almacenes);
 ?>

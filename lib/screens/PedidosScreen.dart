@@ -78,7 +78,7 @@ const List<String> _productosSugeridos = <String>[
 
 class PedidosScreen extends StatefulWidget {
   final List<Map<String, dynamic>> pedidos;
-  const PedidosScreen({Key? key, this.pedidos = const []}) : super(key: key);
+  const PedidosScreen({super.key, this.pedidos = const []});
 
   @override
   State<PedidosScreen> createState() => _PedidosScreenState();
@@ -272,7 +272,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
       _pedidos[idx] = {
         ...pedido,
         'productos': productos,
-        'total': (nuevoTotal as num).toDouble(),
+        'total': (nuevoTotal).toDouble(),
         'estado': 'Autorizado',
       };
     }
@@ -420,7 +420,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
       'unidad': _unidadSel, // unidad general elegida
       'fecha': DateTime.now().toString().substring(0, 19),
       'estado': 'Pendiente',
-      'total': (total as num).toDouble(),
+      'total': (total).toDouble(),
       'productos': _itemsActuales
           .map(
             (e) => {
@@ -898,7 +898,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
                                           dataRowMaxHeight: 72,
                                           headingRowHeight: 56,
                                           headingRowColor:
-                                              MaterialStateProperty.resolveWith(
+                                              WidgetStateProperty.resolveWith(
                                                 (_) => const Color(0xFFF1F5F9),
                                               ),
                                           headingTextStyle: const TextStyle(
@@ -1147,7 +1147,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
         ),
         const SizedBox(height: 6),
         DropdownButtonFormField<String>(
-          value: (value == null || value.isEmpty) ? '' : value,
+          initialValue: (value == null || value.isEmpty) ? '' : value,
           isExpanded: true,
           decoration: InputDecoration(
             contentPadding: const EdgeInsets.symmetric(
@@ -1892,7 +1892,6 @@ class _GradientText extends StatelessWidget {
     this.text, {
     required this.gradient,
     required this.style,
-    super.key,
   });
 
   @override
