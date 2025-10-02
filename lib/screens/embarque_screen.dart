@@ -31,12 +31,74 @@ class Unidad {
   }
 }
 
+class Cliente {
+  final int id;
+  final String nombre;
+  Cliente({required this.id, required this.nombre});
+
+  factory Cliente.fromJson(Map<String, dynamic> json) {
+    final idValue = json['idcliente'];
+    return Cliente(
+      id: idValue is int ? idValue : int.tryParse(idValue.toString()) ?? 0,
+      nombre: json['nombre_cliente'],
+    );
+  }
+}
+
+class Almacenista {
+  final int id;
+  final String nombre;
+  Almacenista({required this.id, required this.nombre});
+
+  factory Almacenista.fromJson(Map<String, dynamic> json) {
+    final idValue = json['idalmacenista'];
+    return Almacenista(
+      id: idValue is int ? idValue : int.tryParse(idValue.toString()) ?? 0,
+      nombre: json['nombre_almacen'],
+    );
+  }
+}
+
+class Camion {
+  final int id;
+  final String nombre;
+  Camion({required this.id, required this.nombre});
+
+  factory Camion.fromJson(Map<String, dynamic> json) {
+    return Camion(
+      id: json['idcamion'],
+      nombre: json['nombre_camion'],
+    );
+  }
+}
+
+class TipoMovimiento {
+  final int id;
+  final String nombre;
+  TipoMovimiento({required this.id, required this.nombre});
+
+  factory TipoMovimiento.fromJson(Map<String, dynamic> json) {
+    return TipoMovimiento(
+      id: json['idtipomovimiento'],
+      nombre: json['nombre_movimiento'],
+    );
+  }
+}
+
 class Producto {
   final int id;
   final String nombre;
   final double precioStock;
 
   Producto({required this.id, required this.nombre, required this.precioStock});
+
+  factory Producto.fromJson(Map<String, dynamic> json) {
+    return Producto(
+      id: json['idproducto'],
+      nombre: json['nombre'],
+      precioStock: (json['precio'] as num).toDouble(),
+    );
+  }
 }
 
 
@@ -51,30 +113,23 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
   // --- Catalogos (dinamicos) ---
   List<Almacen> _almacenes = [];
   List<Unidad> _unidades = [];
+  List<Producto> _productos = [];
+  List<Cliente> _clientes = [];
+  List<Almacenista> _almacenistas = [];
+  List<Camion> _camiones = [];
+  List<TipoMovimiento> _tiposDeMovimiento = [];
   bool _isLoading = true;
 
-  // Mock data for other dropdowns until their APIs are ready
-  final List<String> almacenistas = const ['Arturo Gómez', 'María Pérez'];
-  final List<String> clientes = const ['Walmart', 'OXXO', 'Chedraui'];
+
 
   // --- NUEVOS CATALOGOS DE EJEMPLO ---
-  final List<String> camiones = const ['Triton #1 - Juan Perez', 'Torton #5 - Miguel Lopez', 'Camioneta #2 - Luis Angel'];
-  final List<String> tiposDeMovimiento = const ['Entrada a Bodega', 'Salida a Cliente', 'Traspaso entre Almacenes'];
 
-  // --- CATALOGO DE PRODUCTOS DE EJEMPLO (Paso 2) ---
-  final List<Producto> _productosDeEjemplo = [
-    Producto(id: 101, nombre: 'Cemento Gris 50kg', precioStock: 250.00),
-    Producto(id: 102, nombre: 'Varilla 3/8"', precioStock: 180.50),
-    Producto(id: 103, nombre: 'Arena Fina m³', precioStock: 450.00),
-    Producto(id: 104, nombre: 'Grava 3/4 m³', precioStock: 480.00),
-    Producto(id: 105, nombre: 'Pintura Vinílica 19L', precioStock: 950.00),
-  ];
 
   // --- Estado de filtros/encabezado ---
   int? _selectedAlmacenId;
-  String? almacenista;
+  int? _selectedAlmacenistaId;
   int? _selectedUnidadId;
-  String? cliente;
+  int? _selectedClienteId;
 
   // --- NUEVOS CAMPOS REQUERIDOS POR JUNTA ---
   String? _selectedCamion;
@@ -109,6 +164,11 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
       final responses = await Future.wait([
         http.get(Uri.parse('https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/api_almacenes.php')),
         http.get(Uri.parse('https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/api_unidades.php')),
+        http.get(Uri.parse('https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/api_productos.php')),
+        http.get(Uri.parse('https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/api_clientes.php')),
+        http.get(Uri.parse('https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/api_almacenistas.php')),
+        http.get(Uri.parse('https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/api_camiones.php')),
+        http.get(Uri.parse('https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/api_tipos_movimiento.php')),
       ]);
 
       if (mounted) { // Check if the widget is still in the tree
@@ -116,18 +176,54 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
           final List<dynamic> data = json.decode(responses[0].body);
           _almacenes = data.map((json) => Almacen.fromJson(json)).toList();
         } else {
-          throw Exception('Failed to load almacenes');
+          throw Exception('Failed to load almacenes. Status: ${responses[0].statusCode}, Body: ${responses[0].body}');
         }
 
         if (responses[1].statusCode == 200) {
           final List<dynamic> data = json.decode(responses[1].body);
           _unidades = data.map((json) => Unidad.fromJson(json)).toList();
         } else {
-          throw Exception('Failed to load unidades');
+          throw Exception('Failed to load unidades. Status: ${responses[1].statusCode}, Body: ${responses[1].body}');
+        }
+
+        if (responses[2].statusCode == 200) {
+          final List<dynamic> data = json.decode(responses[2].body);
+          _productos = data.map((json) => Producto.fromJson(json)).toList();
+        } else {
+          throw Exception('Failed to load productos. Status: ${responses[2].statusCode}, Body: ${responses[2].body}');
+        }
+
+        if (responses[3].statusCode == 200) {
+          final List<dynamic> data = json.decode(responses[3].body);
+          _clientes = data.map((json) => Cliente.fromJson(json)).toList();
+        } else {
+          throw Exception('Failed to load clientes. Status: ${responses[3].statusCode}, Body: ${responses[3].body}');
+        }
+
+        if (responses[4].statusCode == 200) {
+          final List<dynamic> data = json.decode(responses[4].body);
+          _almacenistas = data.map((json) => Almacenista.fromJson(json)).toList();
+        } else {
+          throw Exception('Failed to load almacenistas. Status: ${responses[4].statusCode}, Body: ${responses[4].body}');
+        }
+
+        if (responses[5].statusCode == 200) {
+          final List<dynamic> data = json.decode(responses[5].body);
+          _camiones = data.map((json) => Camion.fromJson(json)).toList();
+        } else {
+          throw Exception('Failed to load camiones. Status: ${responses[5].statusCode}, Body: ${responses[5].body}');
+        }
+
+        if (responses[6].statusCode == 200) {
+          final List<dynamic> data = json.decode(responses[6].body);
+          _tiposDeMovimiento = data.map((json) => TipoMovimiento.fromJson(json)).toList();
+        } else {
+          throw Exception('Failed to load tipos de movimiento. Status: ${responses[6].statusCode}, Body: ${responses[6].body}');
         }
       }
     } catch (e) {
        if (mounted) _snack('Error al cargar catálogos: $e', color: Colors.red);
+       print('Error en _fetchCatalogos: $e');
     } finally {
       if (mounted) setState(() { _isLoading = false; });
     }
@@ -146,7 +242,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
 
   void _agregarFila() {
     // Validaciones de encabezado
-    if (_selectedAlmacenId == null || almacenista == null || _selectedUnidadId == null || cliente == null) {
+    if (_selectedAlmacenId == null || _selectedAlmacenistaId == null || _selectedUnidadId == null || _selectedClienteId == null) {
       _snack('Completa todos los campos del encabezado.', color: Colors.red);
       return;
     }
@@ -165,10 +261,11 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
     double calcularPrecioFinal() {
       double precio = _selectedProducto!.precioStock; // Precio base
       
+      final clienteSeleccionado = _clientes.firstWhere((c) => c.id == _selectedClienteId, orElse: () => Cliente(id: 0, nombre: ''));
       // Ejemplo 1: Descuento porcentual por cliente
-      if (cliente == 'Walmart') {
+      if (clienteSeleccionado.nombre == 'Walmart') {
         precio *= 0.90; // 10% de descuento
-      } else if (cliente == 'OXXO') {
+      } else if (clienteSeleccionado.nombre == 'OXXO') {
         precio *= 0.95; // 5% de descuento
       }
 
@@ -224,15 +321,13 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
     // Use the selected IDs directly
     final idalmacen = _selectedAlmacenId;
     final idunidad = _selectedUnidadId;
-    
-    // These are still based on mock data
-    final idalmacenista = almacenistas.indexOf(almacenista!) + 1;
-    final idcliente = clientes.indexOf(cliente!) + 1;
+    final idcliente = _selectedClienteId;
+    final idalmacenista = _selectedAlmacenistaId;
     
     if (idalmacen == null ||
-        almacenista == null ||
+        idalmacenista == null ||
         idunidad == null ||
-        cliente == null ||
+        idcliente == null ||
         _selectedCamion == null ||
         _selectedTipoMovimiento == null ||
         filas.isEmpty) {
@@ -284,9 +379,9 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
           setState(() {
             filas.clear();
             _selectedAlmacenId = null;
-            almacenista = null;
+            _selectedAlmacenistaId = null;
             _selectedUnidadId = null;
-            cliente = null;
+            _selectedClienteId = null;
             _selectedCamion = null;
             _selectedTipoMovimiento = null;
             _cancelacionCtrl.clear();
@@ -344,12 +439,12 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
                           items: _almacenes.map((a) => DropdownMenuItem<int>(value: a.id, child: Text(a.nombre))).toList(),
                           onChanged: (v) => setState(() => _selectedAlmacenId = v),
                         ),
-                        _buildDropdown<String>(
+                        _buildDropdown<int>(
                           label: 'Almacenista',
                           icon: Icons.badge_outlined,
-                          value: almacenista,
-                          items: almacenistas.map((a) => DropdownMenuItem<String>(value: a, child: Text(a))).toList(),
-                          onChanged: (v) => setState(() => almacenista = v),
+                          value: _selectedAlmacenistaId,
+                          items: _almacenistas.map((a) => DropdownMenuItem<int>(value: a.id, child: Text(a.nombre))).toList(),
+                          onChanged: (v) => setState(() => _selectedAlmacenistaId = v),
                         ),
                         _buildDropdown<int>(
                           label: 'Unidad',
@@ -358,25 +453,25 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
                           items: _unidades.map((u) => DropdownMenuItem<int>(value: u.id, child: Text(u.nombre))).toList(),
                           onChanged: (v) => setState(() => _selectedUnidadId = v),
                         ),
-                        _buildDropdown<String>(
+                        _buildDropdown<int>(
                           label: 'Cliente',
                           icon: Icons.person_outline,
-                          value: cliente,
-                          items: clientes.map((c) => DropdownMenuItem<String>(value: c, child: Text(c))).toList(),
-                          onChanged: (v) => setState(() => cliente = v),
+                          value: _selectedClienteId,
+                          items: _clientes.map((c) => DropdownMenuItem<int>(value: c.id, child: Text(c.nombre))).toList(),
+                          onChanged: (v) => setState(() => _selectedClienteId = v),
                         ),
                         _buildDropdown<String>(
                           label: 'Camión (Chofer)',
                           icon: Icons.fire_truck_outlined,
                           value: _selectedCamion,
-                          items: camiones.map((item) => DropdownMenuItem<String>(value: item, child: Text(item))).toList(),
+                          items: _camiones.map((item) => DropdownMenuItem<String>(value: item.nombre, child: Text(item.nombre))).toList(),
                           onChanged: (v) => setState(() => _selectedCamion = v),
                         ),
                         _buildDropdown<String>(
                           label: 'Tipo de Movimiento',
                           icon: Icons.compare_arrows_outlined,
                           value: _selectedTipoMovimiento,
-                          items: tiposDeMovimiento.map((item) => DropdownMenuItem<String>(value: item, child: Text(item))).toList(),
+                          items: _tiposDeMovimiento.map((item) => DropdownMenuItem<String>(value: item.nombre, child: Text(item.nombre))).toList(),
                           onChanged: (v) => setState(() => _selectedTipoMovimiento = v),
                         ),
                         TextField(
@@ -416,7 +511,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
                               label: 'Selecciona un Producto',
                               icon: Icons.shopping_basket_outlined,
                               value: _selectedProducto,
-                              items: _productosDeEjemplo.map((p) => DropdownMenuItem<Producto>(
+                              items: _productos.map((p) => DropdownMenuItem<Producto>(
                                 value: p,
                                 child: Text(p.nombre),
                               )).toList(),
