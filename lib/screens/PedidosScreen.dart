@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:distribuidora/screens/pedido_detail_screen.dart';
 import 'package:intl/intl.dart';
 import 'embarque_screen.dart'; // Reutilizamos el modelo de EmbarqueConsulta
 
@@ -144,9 +145,11 @@ class _PedidosScreenState extends State<PedidosScreen> {
             isThreeLine: true,
             trailing: const Icon(Icons.arrow_forward_ios),
             onTap: () {
-              // TODO: Navegar a la pantalla de detalle del pedido para procesar la entrega y el cobro.
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Procesando embarque #${embarque.idfolioembarque}')),
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => PedidoDetailScreen(embarqueHeader: embarque),
+                ),
               );
             },
           ),
