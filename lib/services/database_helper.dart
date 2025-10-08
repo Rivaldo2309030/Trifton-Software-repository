@@ -5,7 +5,7 @@ import 'dart:io';
 
 class DatabaseHelper {
   static final _databaseName = "embarques.db";
-  static final _databaseVersion = 1;
+  static final _databaseVersion = 2; // Versión incrementada
 
   // --- Singleton ---
   DatabaseHelper._privateConstructor();
@@ -21,7 +21,9 @@ class DatabaseHelper {
     Directory documentsDirectory = await getApplicationDocumentsDirectory();
     String path = join(documentsDirectory.path, _databaseName);
     return await openDatabase(path,
-        version: _databaseVersion, onCreate: _onCreate);
+        version: _databaseVersion,
+        onCreate: _onCreate,
+        onUpgrade: _onUpgrade); // Callback de actualización añadido
   }
 
   Future _onCreate(Database db, int version) async {
@@ -67,6 +69,22 @@ class DatabaseHelper {
         PRIMARY KEY (idcliente, idproducto, idunidad)
       )
     ''');
+  }
+
+  // Se llama si la base de datos ya existe con una versión anterior.
+  Future _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // Si actualizamos desde la v1, la tabla de precios no existe, así que la creamos.
+      await db.execute('''
+        CREATE TABLE precios_cat (
+          idcliente INTEGER NOT NULL,
+          idproducto INTEGER NOT NULL,
+          idunidad INTEGER NOT NULL,
+          preciounitario REAL NOT NULL,
+          PRIMARY KEY (idcliente, idproducto, idunidad)
+        )
+      ''');
+    }
   }
 
   // --- Embarque Methods ---
