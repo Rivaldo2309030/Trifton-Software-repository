@@ -26,7 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 $input = json_decode(file_get_contents('php://input'), true);
 
 // Validar campos principales
-$required_fields = ['idalmacen', 'idvendedor', 'idalmacenista', 'idcliente', 'detalles'];
+$required_fields = ['idalmacen', 'idusuario', 'idalmacenista', 'idcliente', 'detalles'];
 foreach ($required_fields as $field) {
     if (empty($input[$field])) {
         http_response_code(400);
@@ -45,9 +45,9 @@ $conn->begin_transaction();
 
 try {
     // 1. Insertar en la tabla 'embarque'
-    $sql_embarque = "INSERT INTO embarque (idalmacen, idvendedor, idalmacenista, idcliente) VALUES (?, ?, ?, ?)";
+    $sql_embarque = "INSERT INTO embarque (idalmacen, idusuario, idalmacenista, idcliente) VALUES (?, ?, ?, ?)";
     $stmt_embarque = $conn->prepare($sql_embarque);
-    $stmt_embarque->bind_param("iiii", $input['idalmacen'], $input['idvendedor'], $input['idalmacenista'], $input['idcliente']);
+    $stmt_embarque->bind_param("iiii", $input['idalmacen'], $input['idusuario'], $input['idalmacenista'], $input['idcliente']);
     $stmt_embarque->execute();
 
     // 2. Obtener el ID del embarque recién creado

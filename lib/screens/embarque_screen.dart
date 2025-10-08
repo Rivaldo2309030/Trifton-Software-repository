@@ -17,18 +17,6 @@ class Almacen {
   }
 }
 
-class Vendedor {
-  final int id;
-  final String nombre;
-  Vendedor({required this.id, required this.nombre});
-
-  factory Vendedor.fromJson(Map<String, dynamic> json) {
-    return Vendedor(
-      id: int.tryParse(json['idvendedor'].toString()) ?? 0,
-      nombre: json['nombrevendedor'],
-    );
-  }
-}
 
 class Unidad {
   final int id;
@@ -89,7 +77,7 @@ class EmbarqueConsulta {
   final int idfolioembarque;
   final String regtimestamp;
   final String nombre_cliente;
-  final String nombrevendedor;
+  final String nombreusuario;
   final String nombre_almacenista;
   final bool esActivo;
 
@@ -97,7 +85,7 @@ class EmbarqueConsulta {
     required this.idfolioembarque,
     required this.regtimestamp,
     required this.nombre_cliente,
-    required this.nombrevendedor,
+    required this.nombreusuario,
     required this.nombre_almacenista,
     required this.esActivo,
   });
@@ -107,7 +95,7 @@ class EmbarqueConsulta {
       idfolioembarque: int.tryParse(json['idfolioembarque'].toString()) ?? 0,
       regtimestamp: json['regtimestamp'] ?? '',
       nombre_cliente: json['nombre_cliente'] ?? 'N/A',
-      nombrevendedor: json['nombrevendedor'] ?? 'N/A',
+      nombreusuario: json['nombreusuario'] ?? 'N/A',
       nombre_almacenista: json['nombre_almacenista'] ?? 'N/A',
       esActivo: (int.tryParse(json['estado_embarque'].toString()) ?? 0) == 1,
     );
@@ -132,7 +120,6 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
 
   // --- Catalogos (dinamicos) ---
   List<Almacen> _almacenes = [];
-  List<Vendedor> _vendedores = [];
   List<Unidad> _unidades = [];
   List<Producto> _productos = [];
   List<Cliente> _clientes = [];
@@ -141,7 +128,6 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
 
   // --- Estado de filtros/encabezado ---
   int? _selectedAlmacenId;
-  int? _selectedVendedorId;
   int? _selectedAlmacenistaId;
   int? _selectedUnidadId;
   int? _selectedClienteId;
@@ -195,7 +181,6 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
     try {
       final responses = await Future.wait([
         http.get(Uri.parse('${baseUrl}api_almacenes.php')),
-        http.get(Uri.parse('${baseUrl}api_vendedores.php')),
         http.get(Uri.parse('${baseUrl}api_unidades.php')),
         http.get(Uri.parse('${baseUrl}api_productos.php')),
         http.get(Uri.parse('${baseUrl}api_clientes.php')),
@@ -212,33 +197,27 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
       }
 
       if (responses[1].statusCode == 200) {
-        _vendedores = (json.decode(responses[1].body) as List).map((data) => Vendedor.fromJson(data)).toList();
+        _unidades = (json.decode(responses[1].body) as List).map((data) => Unidad.fromJson(data)).toList();
       } else {
-        throw Exception('Fallo al cargar Vendedores (Code: ${responses[1].statusCode}) Body: ${responses[1].body}');
+        throw Exception('Fallo al cargar Unidades (Code: ${responses[1].statusCode}) Body: ${responses[1].body}');
       }
 
       if (responses[2].statusCode == 200) {
-        _unidades = (json.decode(responses[2].body) as List).map((data) => Unidad.fromJson(data)).toList();
+        _productos = (json.decode(responses[2].body) as List).map((data) => Producto.fromJson(data)).toList();
       } else {
-        throw Exception('Fallo al cargar Unidades (Code: ${responses[2].statusCode}) Body: ${responses[2].body}');
+        throw Exception('Fallo al cargar Productos (Code: ${responses[2].statusCode}) Body: ${responses[2].body}');
       }
 
       if (responses[3].statusCode == 200) {
-        _productos = (json.decode(responses[3].body) as List).map((data) => Producto.fromJson(data)).toList();
+        _clientes = (json.decode(responses[3].body) as List).map((data) => Cliente.fromJson(data)).toList();
       } else {
-        throw Exception('Fallo al cargar Productos (Code: ${responses[3].statusCode}) Body: ${responses[3].body}');
+        throw Exception('Fallo al cargar Clientes (Code: ${responses[3].statusCode}) Body: ${responses[3].body}');
       }
 
       if (responses[4].statusCode == 200) {
-        _clientes = (json.decode(responses[4].body) as List).map((data) => Cliente.fromJson(data)).toList();
+        _almacenistas = (json.decode(responses[4].body) as List).map((data) => Almacenista.fromJson(data)).toList();
       } else {
-        throw Exception('Fallo al cargar Clientes (Code: ${responses[4].statusCode}) Body: ${responses[4].body}');
-      }
-
-      if (responses[5].statusCode == 200) {
-        _almacenistas = (json.decode(responses[5].body) as List).map((data) => Almacenista.fromJson(data)).toList();
-      } else {
-        throw Exception('Fallo al cargar Almacenistas (Code: ${responses[5].statusCode}) Body: ${responses[5].body}');
+        throw Exception('Fallo al cargar Almacenistas (Code: ${responses[4].statusCode}) Body: ${responses[4].body}');
       }
 
     } catch (e) {
@@ -293,7 +272,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
 
   void _agregarFila() {
     // Validaciones de encabezado actualizadas
-    if (_selectedAlmacenId == null || _selectedVendedorId == null || _selectedAlmacenistaId == null || _selectedUnidadId == null || _selectedClienteId == null) {
+    if (_selectedAlmacenId == null || _selectedAlmacenistaId == null || _selectedUnidadId == null || _selectedClienteId == null) {
       _snack('Completa todos los campos del encabezado.', color: Colors.red);
       return;
     }
@@ -357,7 +336,6 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
   Future<void> _guardarEmbarqueEnServidor() async {
     // Validar que todos los campos del encabezado estén seleccionados
     if (_selectedAlmacenId == null ||
-        _selectedVendedorId == null ||
         _selectedAlmacenistaId == null ||
         _selectedClienteId == null) {
       _snack('Faltan datos del encabezado.', color: Colors.red);
@@ -381,7 +359,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
 
     final Map<String, dynamic> payload = {
       'idalmacen': _selectedAlmacenId,
-      'idvendedor': _selectedVendedorId,
+      'idusuario': 1, // TODO: Cambiar por el ID del usuario logueado
       'idalmacenista': _selectedAlmacenistaId,
       'idcliente': _selectedClienteId,
       'detalles': detallesPayload,
@@ -404,7 +382,6 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
           // Limpiar todo el formulario
           filas.clear();
           _selectedAlmacenId = null;
-          _selectedVendedorId = null;
           _selectedAlmacenistaId = null;
           _selectedUnidadId = null;
           _selectedClienteId = null;
@@ -526,13 +503,6 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
                                             value: _selectedAlmacenId,
                                             items: _almacenes.map((a) => DropdownMenuItem<int>(value: a.id, child: Text(a.nombre))).toList(),
                                             onChanged: (v) => setState(() => _selectedAlmacenId = v),
-                                          ),
-                                          _buildDropdown<int>(
-                                            label: 'Vendedor',
-                                            icon: Icons.person_pin_rounded,
-                                            value: _selectedVendedorId,
-                                            items: _vendedores.map((v) => DropdownMenuItem<int>(value: v.id, child: Text(v.nombre))).toList(),
-                                            onChanged: (v) => setState(() => _selectedVendedorId = v),
                                           ),
                                           _buildDropdown<int>(
                                             label: 'Almacenista',
@@ -1004,7 +974,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
             DataColumn(label: Text('Folio')),
             DataColumn(label: Text('Fecha')),
             DataColumn(label: Text('Cliente')),
-            DataColumn(label: Text('Vendedor')),
+            DataColumn(label: Text('Usuario')),
             DataColumn(label: Text('Almacenista')),
             DataColumn(label: Text('Estado')),
             DataColumn(label: Text('Acciones')),
@@ -1015,7 +985,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
                 DataCell(Text(embarque.idfolioembarque.toString())),
                 DataCell(Text(embarque.regtimestamp.split(' ').first)), // Mostrar solo la fecha
                 DataCell(Text(embarque.nombre_cliente)),
-                DataCell(Text(embarque.nombrevendedor)),
+                DataCell(Text(embarque.nombreusuario)),
                 DataCell(Text(embarque.nombre_almacenista)),
                 DataCell(
                   Icon(
