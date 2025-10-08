@@ -178,5 +178,53 @@ class DatabaseHelper {
     ''');
     return result;
   }
+
+  // --- Métodos para Sincronización ---
+
+  Future<Map<String, dynamic>> getFullEmbarque(int localId) async {
+    final db = await database;
+    // 1. Obtener la cabecera
+    final List<Map<String, dynamic>> headers = await db.query(
+      'embarque_offline',
+      where: 'idfolioembarque_local = ?',
+      whereArgs: [localId],
+    );
+    if (headers.isEmpty) {
+      return {};
+    }
+    final header = headers.first;
+
+    // 2. Obtener los detalles
+    final List<Map<String, dynamic>> details = await db.query(
+      'embarque_detalle_offline',
+      where: 'idfolioembarque_local_fk = ?',
+      whereArgs: [localId],
+    );
+
+    // 3. Construir el payload que la API espera
+    final Map<String, dynamic> payload = {
+      'idalmacen': header['idalmacen'],
+      'idusuario': header['idusuario'],
+      'idalmacenista': header['idalmacenista'],
+      'idcliente': header['idcliente'],
+      'detalles': details.map((d) => {
+        'idproducto': d['idproducto'],
+        'idunidad': d['idunidad'],
+        'cantidad': d['cantidad'],
+        'preciounitario': d['preciounitario'],
+      }).toList(),
+    };
+
+    return payload;
+  }
+
+  Future<void> deleteLocalEmbarque(int localId) async {
+    final db = await database;
+    await db.delete(
+      'embarque_offline',
+      where: 'idfolioembarque_local = ?',
+      whereArgs: [localId],
+    );
+  }
 }
 }
