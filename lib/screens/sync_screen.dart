@@ -13,8 +13,9 @@ class SyncScreen extends StatefulWidget {
 
 class _SyncScreenState extends State<SyncScreen> {
   bool _isLoading = true;
+  bool _isBulkUploading = false; // Para el estado de subida masiva
   List<Map<String, dynamic>> _unsyncedEmbarques = [];
-  final Set<int> _uploadingIds = {}; // Para rastrear qué embarques se están subiendo
+  final Set<int> _uploadingIds = {};
 
   @override
   void initState() {
@@ -23,6 +24,7 @@ class _SyncScreenState extends State<SyncScreen> {
   }
 
   Future<void> _loadUnsyncedEmbarques() async {
+    if (_isBulkUploading) return; // No refrescar si se está en subida masiva
     setState(() { _isLoading = true; });
     try {
       final db = DatabaseHelper.instance;
@@ -55,13 +57,14 @@ class _SyncScreenState extends State<SyncScreen> {
     }
   }
 
-  Future<void> _subirEmbarque(int localId) async {
-    if (_uploadingIds.contains(localId)) return; // Ya se está subiendo
+  Future<bool> _subirEmbarque(int localId, {bool refreshList = true}) async {
+    if (_uploadingIds.contains(localId) || _isBulkUploading && refreshList) return false;
 
     setState(() {
       _uploadingIds.add(localId);
     });
 
+    bool success = false;
     try {
       final db = DatabaseHelper.instance;
       final payload = await db.getFullEmbarque(localId);
@@ -70,7 +73,6 @@ class _SyncScreenState extends State<SyncScreen> {
         throw Exception('No se pudo construir el payload para el embarque local ID: $localId');
       }
 
-      // Usamos la misma API de la pantalla de embarques
       const String baseUrl = 'https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/';
       final url = Uri.parse('${baseUrl}api_embarques.php');
 
@@ -81,19 +83,21 @@ class _SyncScreenState extends State<SyncScreen> {
       ).timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 201) {
-        // Éxito: borrar el registro local
         await db.deleteLocalEmbarque(localId);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('✅ Embarque subido y sincronizado!'), backgroundColor: Colors.green),
-        );
+        if (refreshList) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('✅ Embarque subido y sincronizado!'), backgroundColor: Colors.green),
+          );
+        }
+        success = true;
       } else {
         final errorData = json.decode(response.body);
         throw Exception(errorData['error'] ?? 'Error desconocido del servidor');
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && refreshList) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('❌ Error al subir: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text('❌ Error al subir ID $localId: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -101,9 +105,43 @@ class _SyncScreenState extends State<SyncScreen> {
         setState(() {
           _uploadingIds.remove(localId);
         });
-        // Refrescar la lista para quitar el elemento subido
-        await _loadUnsyncedEmbarques();
+        if (refreshList) {
+          await _loadUnsyncedEmbarques();
+        }
       }
+    }
+    return success;
+  }
+
+  Future<void> _subirTodo() async {
+    if (_isBulkUploading || _unsyncedEmbarques.isEmpty) return;
+
+    setState(() { _isBulkUploading = true; });
+
+    final idsParaSubir = _unsyncedEmbarques.map((e) => e['idfolioembarque_local'] as int).toList();
+    int exitosos = 0;
+    int fallidos = 0;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Iniciando subida masiva de ${idsParaSubir.length} embarques...'), backgroundColor: Colors.blue),
+    );
+
+    for (final id in idsParaSubir) {
+      final success = await _subirEmbarque(id, refreshList: false);
+      if (success) {
+        exitosos++;
+      } else {
+        fallidos++;
+      }
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Sincronización completada. Éxito: $exitosos, Fallidos: $fallidos'), backgroundColor: fallidos > 0 ? Colors.orange : Colors.green),
+    );
+
+    if (mounted) {
+      setState(() { _isBulkUploading = false; });
+      await _loadUnsyncedEmbarques();
     }
   }
 
@@ -118,22 +156,27 @@ class _SyncScreenState extends State<SyncScreen> {
           IconButton(
             icon: const Icon(Icons.upload_rounded),
             tooltip: 'Subir Todo',
-            onPressed: () {
-              // TODO: Implementar lógica de subir todo
-            },
+            onPressed: _isBulkUploading ? null : _subirTodo,
           ),
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Refrescar Lista',
-            onPressed: _loadUnsyncedEmbarques,
+            onPressed: _isBulkUploading ? null : _loadUnsyncedEmbarques,
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _unsyncedEmbarques.isEmpty
-              ? _buildEmptyState()
-              : _buildListView(),
+      body: Column(
+        children: [
+          if (_isBulkUploading) const LinearProgressIndicator(),
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _unsyncedEmbarques.isEmpty
+                    ? _buildEmptyState()
+                    : _buildListView(),
+          ),
+        ],
+      ),
     );
   }
 
@@ -162,7 +205,7 @@ class _SyncScreenState extends State<SyncScreen> {
                 : ElevatedButton.icon(
                     icon: const Icon(Icons.upload, size: 18),
                     label: const Text('Subir'),
-                    onPressed: () => _subirEmbarque(localId),
+                    onPressed: _isBulkUploading ? null : () => _subirEmbarque(localId),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF0F766E),
                       foregroundColor: Colors.white,
