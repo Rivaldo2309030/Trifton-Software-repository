@@ -2,17 +2,30 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
-// Model classes for the catalog data
+// --- Modelos de Datos Refactorizados ---
+
 class Almacen {
   final int id;
   final String nombre;
   Almacen({required this.id, required this.nombre});
 
   factory Almacen.fromJson(Map<String, dynamic> json) {
-    final idValue = json['idalmacen'];
     return Almacen(
-      id: idValue is int ? idValue : int.tryParse(idValue.toString()) ?? 0,
-      nombre: json['nombre_almacen'],
+      id: int.tryParse(json['idalmacen'].toString()) ?? 0,
+      nombre: json['nombrealmacen'],
+    );
+  }
+}
+
+class Vendedor {
+  final int id;
+  final String nombre;
+  Vendedor({required this.id, required this.nombre});
+
+  factory Vendedor.fromJson(Map<String, dynamic> json) {
+    return Vendedor(
+      id: int.tryParse(json['idvendedor'].toString()) ?? 0,
+      nombre: json['nombrevendedor'],
     );
   }
 }
@@ -23,10 +36,9 @@ class Unidad {
   Unidad({required this.id, required this.nombre});
 
   factory Unidad.fromJson(Map<String, dynamic> json) {
-    final idValue = json['idunidad'];
     return Unidad(
-      id: idValue is int ? idValue : int.tryParse(idValue.toString()) ?? 0,
-      nombre: json['nombre_unidad'],
+      id: int.tryParse(json['idunidad'].toString()) ?? 0,
+      nombre: json['nombreunidad'],
     );
   }
 }
@@ -37,10 +49,9 @@ class Cliente {
   Cliente({required this.id, required this.nombre});
 
   factory Cliente.fromJson(Map<String, dynamic> json) {
-    final idValue = json['idcliente'];
     return Cliente(
-      id: idValue is int ? idValue : int.tryParse(idValue.toString()) ?? 0,
-      nombre: json['nombre_cliente'],
+      id: int.tryParse(json['idcliente'].toString()) ?? 0,
+      nombre: json['nombrecliente'],
     );
   }
 }
@@ -51,36 +62,9 @@ class Almacenista {
   Almacenista({required this.id, required this.nombre});
 
   factory Almacenista.fromJson(Map<String, dynamic> json) {
-    final idValue = json['idalmacenista'];
     return Almacenista(
-      id: idValue is int ? idValue : int.tryParse(idValue.toString()) ?? 0,
-      nombre: json['nombre_almacen'],
-    );
-  }
-}
-
-class Camion {
-  final int id;
-  final String nombre;
-  Camion({required this.id, required this.nombre});
-
-  factory Camion.fromJson(Map<String, dynamic> json) {
-    return Camion(
-      id: json['idcamion'],
-      nombre: json['nombre_camion'],
-    );
-  }
-}
-
-class TipoMovimiento {
-  final int id;
-  final String nombre;
-  TipoMovimiento({required this.id, required this.nombre});
-
-  factory TipoMovimiento.fromJson(Map<String, dynamic> json) {
-    return TipoMovimiento(
-      id: json['idtipomovimiento'],
-      nombre: json['nombre_movimiento'],
+      id: int.tryParse(json['idalmacenista'].toString()) ?? 0,
+      nombre: json['nombre'],
     );
   }
 }
@@ -88,15 +72,44 @@ class TipoMovimiento {
 class Producto {
   final int id;
   final String nombre;
-  final double precioStock;
 
-  Producto({required this.id, required this.nombre, required this.precioStock});
+  Producto({required this.id, required this.nombre});
 
   factory Producto.fromJson(Map<String, dynamic> json) {
     return Producto(
-      id: json['idproducto'],
-      nombre: json['nombre'],
-      precioStock: (json['precio'] as num).toDouble(),
+      id: int.tryParse(json['idproducto'].toString()) ?? 0,
+      nombre: json['nombreproducto'],
+    );
+  }
+}
+
+
+// --- Modelo para la pestaña de Consulta (Actualizado) ---
+class EmbarqueConsulta {
+  final int idfolioembarque;
+  final String regtimestamp;
+  final String nombre_cliente;
+  final String nombrevendedor;
+  final String nombre_almacenista;
+  final bool esActivo;
+
+  EmbarqueConsulta({
+    required this.idfolioembarque,
+    required this.regtimestamp,
+    required this.nombre_cliente,
+    required this.nombrevendedor,
+    required this.nombre_almacenista,
+    required this.esActivo,
+  });
+
+  factory EmbarqueConsulta.fromJson(Map<String, dynamic> json) {
+    return EmbarqueConsulta(
+      idfolioembarque: int.tryParse(json['idfolioembarque'].toString()) ?? 0,
+      regtimestamp: json['regtimestamp'] ?? '',
+      nombre_cliente: json['nombre_cliente'] ?? 'N/A',
+      nombrevendedor: json['nombrevendedor'] ?? 'N/A',
+      nombre_almacenista: json['nombre_almacenista'] ?? 'N/A',
+      esActivo: (int.tryParse(json['estado_embarque'].toString()) ?? 0) == 1,
     );
   }
 }
@@ -109,35 +122,35 @@ class EmbarqueScreen extends StatefulWidget {
   State<EmbarqueScreen> createState() => _EmbarqueScreenState();
 }
 
-class _EmbarqueScreenState extends State<EmbarqueScreen> {
+class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  // --- Estado para la pestaña de Consulta ---
+  List<EmbarqueConsulta> _embarquesConsultados = [];
+  bool _isConsultando = true;
+  DateTime _fechaFiltro = DateTime.now();
+
   // --- Catalogos (dinamicos) ---
   List<Almacen> _almacenes = [];
+  List<Vendedor> _vendedores = [];
   List<Unidad> _unidades = [];
   List<Producto> _productos = [];
   List<Cliente> _clientes = [];
   List<Almacenista> _almacenistas = [];
-  List<Camion> _camiones = [];
-  List<TipoMovimiento> _tiposDeMovimiento = [];
   bool _isLoading = true;
-
-
-
-  // --- NUEVOS CATALOGOS DE EJEMPLO ---
-
 
   // --- Estado de filtros/encabezado ---
   int? _selectedAlmacenId;
+  int? _selectedVendedorId;
   int? _selectedAlmacenistaId;
   int? _selectedUnidadId;
   int? _selectedClienteId;
 
-  // --- NUEVOS CAMPOS REQUERIDOS POR JUNTA ---
-  String? _selectedCamion;
-  String? _selectedTipoMovimiento;
-  final TextEditingController _cancelacionCtrl = TextEditingController();
+  final TextEditingController _productoAutocompleteCtrl = TextEditingController();
 
   // --- ESTADO PARA NUEVA SELECCION DE PRODUCTOS ---
   Producto? _selectedProducto;
+  double? _precioUnitarioDinamico; // Para guardar el precio obtenido de la API
 
   // --- Controles para agregar producto ---
   final TextEditingController cantidadCtrl = TextEditingController(text: '1');
@@ -148,84 +161,122 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _fetchCatalogos();
+    _consultarEmbarques(); // Carga inicial para la pestaña de consulta
+
+    _tabController.addListener(() {
+      if (_tabController.indexIsChanging) {
+        // No hacer nada mientras la animación está en curso
+      } else {
+        if (_tabController.index == 1 && _embarquesConsultados.isEmpty) {
+          // Si el usuario va a la pestaña de consulta y está vacía, refrescar.
+          _consultarEmbarques();
+        }
+      }
+    });
   }
 
   @override
   void dispose() {
-    _cancelacionCtrl.dispose();
+    _tabController.dispose();
+    _productoAutocompleteCtrl.dispose();
     cantidadCtrl.dispose();
+    for (var fila in filas) {
+      (fila['precio_controller'] as TextEditingController).dispose();
+    }
     super.dispose();
   }
 
   Future<void> _fetchCatalogos() async {
     setState(() { _isLoading = true; });
+    const String baseUrl = 'https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/'; // URL Base
+
     try {
       final responses = await Future.wait([
-        http.get(Uri.parse('https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/api_almacenes.php')),
-        http.get(Uri.parse('https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/api_unidades.php')),
-        http.get(Uri.parse('https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/api_productos.php')),
-        http.get(Uri.parse('https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/api_clientes.php')),
-        http.get(Uri.parse('https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/api_almacenistas.php')),
-        http.get(Uri.parse('https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/api_camiones.php')),
-        http.get(Uri.parse('https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/api_tipos_movimiento.php')),
+        http.get(Uri.parse('${baseUrl}api_almacenes.php')),
+        http.get(Uri.parse('${baseUrl}api_vendedores.php')),
+        http.get(Uri.parse('${baseUrl}api_unidades.php')),
+        http.get(Uri.parse('${baseUrl}api_productos.php')),
+        http.get(Uri.parse('${baseUrl}api_clientes.php')),
+        http.get(Uri.parse('${baseUrl}api_almacenistas.php')),
       ]);
 
-      if (mounted) { // Check if the widget is still in the tree
-        if (responses[0].statusCode == 200) {
-          final List<dynamic> data = json.decode(responses[0].body);
-          _almacenes = data.map((json) => Almacen.fromJson(json)).toList();
-        } else {
-          throw Exception('Failed to load almacenes. Status: ${responses[0].statusCode}, Body: ${responses[0].body}');
-        }
+      if (!mounted) return;
 
-        if (responses[1].statusCode == 200) {
-          final List<dynamic> data = json.decode(responses[1].body);
-          _unidades = data.map((json) => Unidad.fromJson(json)).toList();
-        } else {
-          throw Exception('Failed to load unidades. Status: ${responses[1].statusCode}, Body: ${responses[1].body}');
-        }
-
-        if (responses[2].statusCode == 200) {
-          final List<dynamic> data = json.decode(responses[2].body);
-          _productos = data.map((json) => Producto.fromJson(json)).toList();
-        } else {
-          throw Exception('Failed to load productos. Status: ${responses[2].statusCode}, Body: ${responses[2].body}');
-        }
-
-        if (responses[3].statusCode == 200) {
-          final List<dynamic> data = json.decode(responses[3].body);
-          _clientes = data.map((json) => Cliente.fromJson(json)).toList();
-        } else {
-          throw Exception('Failed to load clientes. Status: ${responses[3].statusCode}, Body: ${responses[3].body}');
-        }
-
-        if (responses[4].statusCode == 200) {
-          final List<dynamic> data = json.decode(responses[4].body);
-          _almacenistas = data.map((json) => Almacenista.fromJson(json)).toList();
-        } else {
-          throw Exception('Failed to load almacenistas. Status: ${responses[4].statusCode}, Body: ${responses[4].body}');
-        }
-
-        if (responses[5].statusCode == 200) {
-          final List<dynamic> data = json.decode(responses[5].body);
-          _camiones = data.map((json) => Camion.fromJson(json)).toList();
-        } else {
-          throw Exception('Failed to load camiones. Status: ${responses[5].statusCode}, Body: ${responses[5].body}');
-        }
-
-        if (responses[6].statusCode == 200) {
-          final List<dynamic> data = json.decode(responses[6].body);
-          _tiposDeMovimiento = data.map((json) => TipoMovimiento.fromJson(json)).toList();
-        } else {
-          throw Exception('Failed to load tipos de movimiento. Status: ${responses[6].statusCode}, Body: ${responses[6].body}');
-        }
+      // Revisar cada respuesta individualmente
+      if (responses[0].statusCode == 200) {
+        _almacenes = (json.decode(responses[0].body) as List).map((data) => Almacen.fromJson(data)).toList();
+      } else {
+        throw Exception('Fallo al cargar Almacenes (Code: ${responses[0].statusCode}) Body: ${responses[0].body}');
       }
+
+      if (responses[1].statusCode == 200) {
+        _vendedores = (json.decode(responses[1].body) as List).map((data) => Vendedor.fromJson(data)).toList();
+      } else {
+        throw Exception('Fallo al cargar Vendedores (Code: ${responses[1].statusCode}) Body: ${responses[1].body}');
+      }
+
+      if (responses[2].statusCode == 200) {
+        _unidades = (json.decode(responses[2].body) as List).map((data) => Unidad.fromJson(data)).toList();
+      } else {
+        throw Exception('Fallo al cargar Unidades (Code: ${responses[2].statusCode}) Body: ${responses[2].body}');
+      }
+
+      if (responses[3].statusCode == 200) {
+        _productos = (json.decode(responses[3].body) as List).map((data) => Producto.fromJson(data)).toList();
+      } else {
+        throw Exception('Fallo al cargar Productos (Code: ${responses[3].statusCode}) Body: ${responses[3].body}');
+      }
+
+      if (responses[4].statusCode == 200) {
+        _clientes = (json.decode(responses[4].body) as List).map((data) => Cliente.fromJson(data)).toList();
+      } else {
+        throw Exception('Fallo al cargar Clientes (Code: ${responses[4].statusCode}) Body: ${responses[4].body}');
+      }
+
+      if (responses[5].statusCode == 200) {
+        _almacenistas = (json.decode(responses[5].body) as List).map((data) => Almacenista.fromJson(data)).toList();
+      } else {
+        throw Exception('Fallo al cargar Almacenistas (Code: ${responses[5].statusCode}) Body: ${responses[5].body}');
+      }
+
     } catch (e) {
        if (mounted) _snack('Error al cargar catálogos: $e', color: Colors.red);
        print('Error en _fetchCatalogos: $e');
     } finally {
       if (mounted) setState(() { _isLoading = false; });
+    }
+  }
+
+  Future<void> _fetchPrecio() async {
+    if (_selectedProducto == null || _selectedClienteId == null || _selectedUnidadId == null) {
+      setState(() => _precioUnitarioDinamico = null); // Limpiar si no hay datos suficientes
+      return;
+    }
+
+    const String baseUrl = 'https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/';
+    print('--- Debug Precios: Cliente ID: $_selectedClienteId, Producto ID: ${_selectedProducto?.id}, Unidad ID: $_selectedUnidadId ---');
+    final url = Uri.parse('${baseUrl}api_precios.php?idcliente=$_selectedClienteId&idproducto=${_selectedProducto!.id}&idunidad=$_selectedUnidadId');
+
+    try {
+      final response = await http.get(url);
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['preciounitario'] != null) {
+          setState(() {
+            _precioUnitarioDinamico = (data['preciounitario'] as num).toDouble();
+          });
+        } else {
+          _snack('No se encontró un precio para la combinación seleccionada.', color: Colors.orange);
+          setState(() => _precioUnitarioDinamico = null);
+        }
+      } else {
+        throw Exception('Error del servidor: ${response.statusCode}');
+      }
+    } catch (e) {
+      _snack('Error al obtener el precio: $e', color: Colors.red);
+      setState(() => _precioUnitarioDinamico = null);
     }
   }
 
@@ -241,44 +292,24 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
   }
 
   void _agregarFila() {
-    // Validaciones de encabezado
-    if (_selectedAlmacenId == null || _selectedAlmacenistaId == null || _selectedUnidadId == null || _selectedClienteId == null) {
+    // Validaciones de encabezado actualizadas
+    if (_selectedAlmacenId == null || _selectedVendedorId == null || _selectedAlmacenistaId == null || _selectedUnidadId == null || _selectedClienteId == null) {
       _snack('Completa todos los campos del encabezado.', color: Colors.red);
       return;
     }
     
-    // --- NUEVA LOGICA DE AGREGAR PRODUCTO ---
     if (_selectedProducto == null) {
       _snack('Selecciona un producto de la lista.', color: Colors.red);
       return;
     }
 
-    int cantidad = int.tryParse(cantidadCtrl.text) ?? 1;
-    if (cantidad < 1) cantidad = 1;
-
-    // --- PASO 3: LÓGICA DE PRECIOS DINÁMICOS (EJEMPLO) ---
-    // TODO: Reemplaza esta función con tus reglas de negocio reales.
-    double calcularPrecioFinal() {
-      double precio = _selectedProducto!.precioStock; // Precio base
-      
-      final clienteSeleccionado = _clientes.firstWhere((c) => c.id == _selectedClienteId, orElse: () => Cliente(id: 0, nombre: ''));
-      // Ejemplo 1: Descuento porcentual por cliente
-      if (clienteSeleccionado.nombre == 'Walmart') {
-        precio *= 0.90; // 10% de descuento
-      } else if (clienteSeleccionado.nombre == 'OXXO') {
-        precio *= 0.95; // 5% de descuento
-      }
-
-      // Ejemplo 2: Aumento de costo fijo por almacén
-      final almacenSeleccionado = _almacenes.firstWhere((a) => a.id == _selectedAlmacenId, orElse: () => Almacen(id: 0, nombre: ''));
-      if (almacenSeleccionado.nombre.contains('Cancún')) {
-          precio += 15.0; // Costo extra de $15 por logística en Cancún
-      }
-
-      return precio;
+    if (_precioUnitarioDinamico == null) {
+      _snack('No se pudo obtener un precio para este producto. Verifica la configuración.', color: Colors.red);
+      return;
     }
 
-    final precioFinal = calcularPrecioFinal();
+    int cantidad = int.tryParse(cantidadCtrl.text) ?? 1;
+    if (cantidad < 1) cantidad = 1;
 
     setState(() {
       filas.add({
@@ -286,13 +317,16 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
         'cantidad': cantidad,
         'unidad': _unidades.firstWhere((u) => u.id == _selectedUnidadId, orElse: () => Unidad(id: 0, nombre: 'N/A')).nombre,
         'producto': _selectedProducto!.nombre,
-        'precio': precioFinal,
-        'idproducto': _selectedProducto!.id, // Guardamos el ID para el envío
+        'precio_controller': TextEditingController(text: _precioUnitarioDinamico!.toStringAsFixed(2)),
+        'idproducto': _selectedProducto!.id,
+        'idunidad': _selectedUnidadId, // Guardamos también el id de unidad para el guardado final
       });
       
       // Limpiar controles
       _selectedProducto = null;
+      _productoAutocompleteCtrl.clear();
       cantidadCtrl.text = '1';
+      _precioUnitarioDinamico = null;
     });
   }
 
@@ -314,89 +348,126 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
 
   double get total => filas.fold<double>(
         0.0,
-        (sum, f) => sum + (f['cantidad'] as int) * (f['precio'] as double),
+        (sum, f) {
+          final precio = double.tryParse((f['precio_controller'] as TextEditingController).text) ?? 0.0;
+          return sum + (f['cantidad'] as int) * precio;
+        },
       );
 
   Future<void> _guardarEmbarqueEnServidor() async {
-    // Use the selected IDs directly
-    final idalmacen = _selectedAlmacenId;
-    final idunidad = _selectedUnidadId;
-    final idcliente = _selectedClienteId;
-    final idalmacenista = _selectedAlmacenistaId;
-    
-    if (idalmacen == null ||
-        idalmacenista == null ||
-        idunidad == null ||
-        idcliente == null ||
-        _selectedCamion == null ||
-        _selectedTipoMovimiento == null ||
-        filas.isEmpty) {
-      _snack('Faltan datos de encabezado o no hay productos', color: Colors.red);
+    // Validar que todos los campos del encabezado estén seleccionados
+    if (_selectedAlmacenId == null ||
+        _selectedVendedorId == null ||
+        _selectedAlmacenistaId == null ||
+        _selectedClienteId == null) {
+      _snack('Faltan datos del encabezado.', color: Colors.red);
       return;
     }
 
-    final urlEmbarque = Uri.parse('https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/api_embarques.php');
-    
+    if (filas.isEmpty) {
+      _snack('No hay productos en el detalle del embarque.', color: Colors.red);
+      return;
+    }
+
+    // Construir el payload para la API
+    final List<Map<String, dynamic>> detallesPayload = filas.map((fila) {
+      return {
+        'idproducto': fila['idproducto'],
+        'idunidad': fila['idunidad'],
+        'cantidad': fila['cantidad'],
+        'preciounitario': double.tryParse((fila['precio_controller'] as TextEditingController).text) ?? 0.0,
+      };
+    }).toList();
+
+    final Map<String, dynamic> payload = {
+      'idalmacen': _selectedAlmacenId,
+      'idvendedor': _selectedVendedorId,
+      'idalmacenista': _selectedAlmacenistaId,
+      'idcliente': _selectedClienteId,
+      'detalles': detallesPayload,
+    };
+
+    const String baseUrl = 'https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/';
+    final url = Uri.parse('${baseUrl}api_embarques.php');
+
     try {
-      final responseEmbarque = await http.post(
-        urlEmbarque,
+      final response = await http.post(
+        url,
         headers: {'Content-Type': 'application/json; charset=UTF-8'},
-        body: jsonEncode({
-          "idalmacen": idalmacen,
-          "idalmacenista": idalmacenista,
-          "idunidad": idunidad,
-          "idcliente": idcliente,
-          "total": total,
-          "camion_chofer": _selectedCamion,
-          "tipo_movimiento": _selectedTipoMovimiento,
-          "motivo_cancelacion": _cancelacionCtrl.text,
-        }),
+        body: jsonEncode(payload),
       );
 
-      if (responseEmbarque.statusCode == 201) {
-        final Map<String, dynamic> data = json.decode(responseEmbarque.body);
-        final int idembarque = data['idembarque'];
-
-        final urlDetalle = Uri.parse('https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/api_embarque_detalle.php');
-        
-        final List<Map<String, dynamic>> productosPayload = filas.map((fila) => {
-          "idproducto": fila['idproducto'], // <-- CAMBIO CLAVE
-          "cantidad": fila['cantidad'],
-          "precio": fila['precio'],
-        }).toList();
-
-        final responseDetalle = await http.post(
-          urlDetalle,
-          headers: {'Content-Type': 'application/json; charset=UTF-8'},
-          body: jsonEncode({
-            "idembarque": idembarque,
-            "productos": productosPayload,
-          }),
-        );
-        
-        if (responseDetalle.statusCode == 201) {
-          _snack('✅ Embarque guardado exitosamente.', color: Colors.green);
-          setState(() {
-            filas.clear();
-            _selectedAlmacenId = null;
-            _selectedAlmacenistaId = null;
-            _selectedUnidadId = null;
-            _selectedClienteId = null;
-            _selectedCamion = null;
-            _selectedTipoMovimiento = null;
-            _cancelacionCtrl.clear();
-          });
-        } else {
-          _snack('❌ Error al guardar detalles: ${responseDetalle.statusCode}', color: Colors.red);
-          print('Respuesta del servidor: ${responseDetalle.body}');
-        }
+      if (response.statusCode == 201) {
+        final data = json.decode(response.body);
+        _snack('✅ Embarque guardado exitosamente. Folio: ${data['idfolioembarque']}', color: Colors.green);
+        setState(() {
+          // Limpiar todo el formulario
+          filas.clear();
+          _selectedAlmacenId = null;
+          _selectedVendedorId = null;
+          _selectedAlmacenistaId = null;
+          _selectedUnidadId = null;
+          _selectedClienteId = null;
+          _selectedProducto = null;
+          _productoAutocompleteCtrl.clear();
+          cantidadCtrl.text = '1';
+          _precioUnitarioDinamico = null;
+        });
       } else {
-        _snack('❌ Error al guardar encabezado: ${responseEmbarque.statusCode}', color: Colors.red);
-        print('Respuesta del servidor: ${responseEmbarque.body}');
+        final errorData = json.decode(response.body);
+        _snack('❌ Error al guardar: ${errorData['error'] ?? 'Error desconocido'}', color: Colors.red);
+        print('Respuesta del servidor (${response.statusCode}): ${response.body}');
       }
     } catch (e) {
       _snack('❌ Error de conexión: $e', color: Colors.red);
-      print('Error: $e');
+      print('Error en _guardarEmbarqueEnServidor: $e');
+    }
+  }
+
+  // --- Lógica para la Pestaña de Consulta (Actualizada) ---
+  Future<void> _consultarEmbarques({DateTime? fecha}) async {
+    if (!mounted) return;
+    setState(() {
+      _isConsultando = true;
+    });
+
+    try {
+      final fechaAFiltrar = fecha ?? _fechaFiltro;
+      final formattedDate = "${fechaAFiltrar.year}-${fechaAFiltrar.month.toString().padLeft(2, '0')}-${fechaAFiltrar.day.toString().padLeft(2, '0')}";
+      
+      const String baseUrl = 'https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/';
+      final url = Uri.parse('${baseUrl}api_consulta_embarques.php?fecha=$formattedDate');
+      
+      final response = await http.get(url);
+
+      if (mounted) {
+        if (response.statusCode == 200) {
+          final Map<String, dynamic> decoded = json.decode(response.body);
+          if (decoded['success'] == true) {
+            final List<dynamic> data = decoded['data'];
+            setState(() {
+              _embarquesConsultados = data.map((json) => EmbarqueConsulta.fromJson(json)).toList();
+            });
+          } else {
+            throw Exception(decoded['error'] ?? 'Error desconocido del servidor');
+          }
+        } else {
+          throw Exception('Error de conexión: ${response.statusCode}');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        _snack('Error al consultar embarques: $e', color: Colors.red);
+        setState(() {
+          _embarquesConsultados = []; // Limpiar en caso de error
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isConsultando = false;
+        });
+      }
     }
   }
 
@@ -407,279 +478,354 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
       body: SafeArea(
         child: _isLoading
             ? const Center(child: CircularProgressIndicator())
-            : SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _Header(),
-              const SizedBox(height: 16),
-
-              // Encabezado
-              _CardWrap(
-                child: LayoutBuilder(
-                  builder: (context, c) {
-                    final w = c.maxWidth;
-                    final isPhone = w < 700;
-                    final isTablet = w >= 700 && w < 1100;
-                    final cols = isPhone ? 2 : 3;
-
-                    return GridView.count(
-                      crossAxisCount: cols,
-                      mainAxisSpacing: 16,
-                      crossAxisSpacing: 16,
-                      childAspectRatio: isPhone ? 3.2 : (isTablet ? 3.4 : 3.8),
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      children: [
-                        _buildDropdown<int>(
-                          label: 'Almacén',
-                          icon: Icons.store_mall_directory_outlined,
-                          value: _selectedAlmacenId,
-                          items: _almacenes.map((a) => DropdownMenuItem<int>(value: a.id, child: Text(a.nombre))).toList(),
-                          onChanged: (v) => setState(() => _selectedAlmacenId = v),
-                        ),
-                        _buildDropdown<int>(
-                          label: 'Almacenista',
-                          icon: Icons.badge_outlined,
-                          value: _selectedAlmacenistaId,
-                          items: _almacenistas.map((a) => DropdownMenuItem<int>(value: a.id, child: Text(a.nombre))).toList(),
-                          onChanged: (v) => setState(() => _selectedAlmacenistaId = v),
-                        ),
-                        _buildDropdown<int>(
-                          label: 'Unidad',
-                          icon: Icons.straighten,
-                          value: _selectedUnidadId,
-                          items: _unidades.map((u) => DropdownMenuItem<int>(value: u.id, child: Text(u.nombre))).toList(),
-                          onChanged: (v) => setState(() => _selectedUnidadId = v),
-                        ),
-                        _buildDropdown<int>(
-                          label: 'Cliente',
-                          icon: Icons.person_outline,
-                          value: _selectedClienteId,
-                          items: _clientes.map((c) => DropdownMenuItem<int>(value: c.id, child: Text(c.nombre))).toList(),
-                          onChanged: (v) => setState(() => _selectedClienteId = v),
-                        ),
-                        _buildDropdown<String>(
-                          label: 'Camión (Chofer)',
-                          icon: Icons.fire_truck_outlined,
-                          value: _selectedCamion,
-                          items: _camiones.map((item) => DropdownMenuItem<String>(value: item.nombre, child: Text(item.nombre))).toList(),
-                          onChanged: (v) => setState(() => _selectedCamion = v),
-                        ),
-                        _buildDropdown<String>(
-                          label: 'Tipo de Movimiento',
-                          icon: Icons.compare_arrows_outlined,
-                          value: _selectedTipoMovimiento,
-                          items: _tiposDeMovimiento.map((item) => DropdownMenuItem<String>(value: item.nombre, child: Text(item.nombre))).toList(),
-                          onChanged: (v) => setState(() => _selectedTipoMovimiento = v),
-                        ),
-                        TextField(
-                          controller: _cancelacionCtrl,
-                          decoration: _inputDeco(
-                            label: 'Motivo Cancelación',
-                            icon: Icons.cancel_outlined,
-                          ),
-                        ),
+            : Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _Header(),
+                    const SizedBox(height: 8),
+                    TabBar(
+                      controller: _tabController,
+                      labelColor: const Color(0xFF1E3A8A),
+                      unselectedLabelColor: Colors.grey,
+                      indicatorColor: const Color(0xFF1E3A8A),
+                      tabs: const [
+                        Tab(text: 'CREAR', icon: Icon(Icons.add_circle_outline)),
+                        Tab(text: 'CONSULTAR', icon: Icon(Icons.search)),
                       ],
-                    );
-                  },
-                ),
-              ),
-
-              const SizedBox(height: 16),
-              
-              // Captura de productos
-              _CardWrap(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const _SectionTitle('Producto'),
-                    const SizedBox(height: 12),
-                    LayoutBuilder(builder: (context, c) {
-                      final isSmall = c.maxWidth < 500;
-                      return Wrap(
-                        spacing: 16,
-                        runSpacing: 16,
-                        alignment: WrapAlignment.spaceBetween,
-                        crossAxisAlignment: WrapCrossAlignment.end,
+                    ),
+                    const SizedBox(height: 16),
+                    Expanded(
+                      child: TabBarView(
+                        controller: _tabController,
                         children: [
-                          // Dropdown de productos
-                          SizedBox(
-                            width: isSmall ? double.infinity : c.maxWidth * 0.5,
-                            child: _buildDropdown<Producto>(
-                              label: 'Selecciona un Producto',
-                              icon: Icons.shopping_basket_outlined,
-                              value: _selectedProducto,
-                              items: _productos.map((p) => DropdownMenuItem<Producto>(
-                                value: p,
-                                child: Text(p.nombre),
-                              )).toList(),
-                              onChanged: (p) => setState(() => _selectedProducto = p),
-                            ),
-                          ),
-                          // Campo de cantidad
-                          SizedBox(
-                            width: isSmall ? double.infinity : c.maxWidth * 0.2,
-                            child: TextField(
-                              controller: cantidadCtrl,
-                              keyboardType: TextInputType.number,
-                              decoration: _inputDeco(
-                                label: 'Cantidad',
-                                icon: Icons.format_list_numbered,
-                              ),
-                            ),
-                          ),
-                          // Botón de agregar
-                          SizedBox(
-                            width: isSmall ? double.infinity : c.maxWidth * 0.2,
-                            child: _primaryButton(
-                              icon: Icons.add_circle_outline,
-                              text: 'Agregar',
-                              background: const Color(0xFF1E3A8A),
-                              onPressed: _agregarFila,
-                            ),
-                          ),
-                        ],
-                      );
-                    }),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 16),
-
-              // Tabla de productos
-              _CardWrap(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const _SectionTitle('Detalle'),
-                    const SizedBox(height: 12),
-                    filas.isEmpty
-                        ? const Padding(
-                            padding: EdgeInsets.all(24.0),
-                            child: Center(
-                              child: Text('Sin productos agregados', style: TextStyle(color: Colors.grey)),
-                            ),
-                          )
-                        : SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: DataTable(
-                              columns: const [
-                                DataColumn(label: Text('cod.')),
-                                DataColumn(label: Text('Cantidad')),
-                                DataColumn(label: Text('Unidad')),
-                                DataColumn(label: Text('Producto')),
-                                DataColumn(label: Text('P/U')),
-                                DataColumn(label: Text('Acciones')),
-                              ],
-                              rows: [
-                                for (int i = 0; i < filas.length; i++)
-                                  DataRow(
-                                    cells: [
-                                      DataCell(Text(filas[i]['cod'] as String)),
-                                      DataCell(Row(
-                                        mainAxisSize: MainAxisSize.min,
+                          // --- Pestaña 1: Formulario de Creación ---
+                          SingleChildScrollView(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                _CardWrap(
+                                  child: LayoutBuilder(
+                                    builder: (context, c) {
+                                      final w = c.maxWidth;
+                                      final isPhone = w < 700;
+                                      final isTablet = w >= 700 && w < 1100;
+                                      
+                                      return GridView.count(
+                                        crossAxisCount: isPhone ? 2 : (isTablet ? 3 : 5),
+                                        mainAxisSpacing: 16,
+                                        crossAxisSpacing: 16,
+                                        childAspectRatio: isPhone ? 3.2 : (isTablet ? 3.4 : 3.2),
+                                        shrinkWrap: true,
+                                        physics: const NeverScrollableScrollPhysics(),
                                         children: [
-                                          IconButton(
-                                            icon: const Icon(Icons.remove),
-                                            color: Colors.red,
-                                            iconSize: 18,
-                                            onPressed: () => _cambiarCantidad(i, -1),
+                                          _buildDropdown<int>(
+                                            label: 'Almacén',
+                                            icon: Icons.store_mall_directory_outlined,
+                                            value: _selectedAlmacenId,
+                                            items: _almacenes.map((a) => DropdownMenuItem<int>(value: a.id, child: Text(a.nombre))).toList(),
+                                            onChanged: (v) => setState(() => _selectedAlmacenId = v),
                                           ),
-                                          Text('${filas[i]['cantidad']}'),
-                                          IconButton(
-                                            icon: const Icon(Icons.add),
-                                            color: Colors.green,
-                                            iconSize: 18,
-                                            onPressed: () => _cambiarCantidad(i, 1),
+                                          _buildDropdown<int>(
+                                            label: 'Vendedor',
+                                            icon: Icons.person_pin_rounded,
+                                            value: _selectedVendedorId,
+                                            items: _vendedores.map((v) => DropdownMenuItem<int>(value: v.id, child: Text(v.nombre))).toList(),
+                                            onChanged: (v) => setState(() => _selectedVendedorId = v),
+                                          ),
+                                          _buildDropdown<int>(
+                                            label: 'Almacenista',
+                                            icon: Icons.badge_outlined,
+                                            value: _selectedAlmacenistaId,
+                                            items: _almacenistas.map((a) => DropdownMenuItem<int>(value: a.id, child: Text(a.nombre))).toList(),
+                                            onChanged: (v) => setState(() => _selectedAlmacenistaId = v),
+                                          ),
+                                          _buildDropdown<int>(
+                                            label: 'Unidad',
+                                            icon: Icons.straighten,
+                                            value: _selectedUnidadId,
+                                            items: _unidades.map((u) => DropdownMenuItem<int>(value: u.id, child: Text(u.nombre))).toList(),
+                                            onChanged: (v) {
+                                              setState(() => _selectedUnidadId = v);
+                                              _fetchPrecio();
+                                            },
+                                          ),
+                                          _buildDropdown<int>(
+                                            label: 'Cliente',
+                                            icon: Icons.person_outline,
+                                            value: _selectedClienteId,
+                                            items: _clientes.map((c) => DropdownMenuItem<int>(value: c.id, child: Text(c.nombre))).toList(),
+                                            onChanged: (v) {
+                                              setState(() => _selectedClienteId = v);
+                                              _fetchPrecio();
+                                            },
                                           ),
                                         ],
-                                      )),
-                                      DataCell(Text(filas[i]['unidad'].toString())),
-                                      DataCell(Text(filas[i]['producto'].toString())),
-                                      DataCell(Text('\$${(filas[i]['precio'] as double).toStringAsFixed(2)}')),
-                                      DataCell(
-                                        IconButton(
-                                          icon: const Icon(Icons.delete),
-                                          color: Colors.red,
-                                          onPressed: () => _eliminar(i),
+                                      );
+                                    },
+                                  ),
+                                ),
+
+                                const SizedBox(height: 16),
+                                
+                                // Captura de productos
+                                _CardWrap(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                                    children: [
+                                      const _SectionTitle('Producto'),
+                                      const SizedBox(height: 12),
+                                      LayoutBuilder(builder: (context, c) {
+                                        final isSmall = c.maxWidth < 500;
+                                        return Wrap(
+                                          spacing: 16,
+                                          runSpacing: 16,
+                                          alignment: WrapAlignment.spaceBetween,
+                                          crossAxisAlignment: WrapCrossAlignment.end,
+                                          children: [
+                                            // Autocomplete de productos
+                                            SizedBox(
+                                              width: isSmall ? double.infinity : c.maxWidth * 0.5,
+                                              child: Autocomplete<Producto>(
+                                                displayStringForOption: (Producto option) => option.nombre,
+                                                optionsBuilder: (TextEditingValue textEditingValue) {
+                                                  if (textEditingValue.text == '') {
+                                                    return const Iterable<Producto>.empty();
+                                                  }
+                                                  return _productos.where((Producto option) {
+                                                    return option.nombre.toLowerCase().contains(textEditingValue.text.toLowerCase());
+                                                  });
+                                                },
+                                                onSelected: (Producto selection) {
+                                                  setState(() {
+                                                    _selectedProducto = selection;
+                                                  });
+                                                  _fetchPrecio();
+                                                },
+                                                fieldViewBuilder: (BuildContext context, TextEditingController fieldController, FocusNode fieldFocusNode, VoidCallback onFieldSubmitted) {
+                                                  // Asignar el controlador externo
+                                                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                                                    fieldController.text = _productoAutocompleteCtrl.text;
+                                                  });
+                                                  return TextField(
+                                                    controller: fieldController,
+                                                    focusNode: fieldFocusNode,
+                                                    decoration: _inputDeco(
+                                                      label: 'Busca un Producto',
+                                                      icon: Icons.shopping_basket_outlined,
+                                                      trailing: IconButton(
+                                                        icon: const Icon(Icons.clear, size: 20),
+                                                        onPressed: () {
+                                                          fieldController.clear();
+                                                          setState(() {
+                                                            _selectedProducto = null;
+                                                          });
+                                                        },
+                                                      ),
+                                                    ),
+                                                  );
+                                                },
+                                              ),
+                                            ),
+                                            // Campo de cantidad
+                                            SizedBox(
+                                              width: isSmall ? double.infinity : c.maxWidth * 0.2,
+                                              child: TextField(
+                                                controller: cantidadCtrl,
+                                                keyboardType: TextInputType.number,
+                                                decoration: _inputDeco(
+                                                  label: 'Cantidad',
+                                                  icon: Icons.format_list_numbered,
+                                                ),
+                                              ),
+                                            ),
+                                            // Botón de agregar
+                                            SizedBox(
+                                              width: isSmall ? double.infinity : c.maxWidth * 0.2,
+                                              child: _primaryButton(
+                                                icon: Icons.add_circle_outline,
+                                                text: 'Agregar',
+                                                background: const Color(0xFF1E3A8A),
+                                                onPressed: _agregarFila,
+                                              ),
+                                            ),
+                                          ],
+                                        );
+                                      }),
+                                    ],
+                                  ),
+                                ),
+
+                                const SizedBox(height: 16),
+
+                                // Tabla de productos
+                                _CardWrap(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                                    children: [
+                                      const _SectionTitle('Detalle'),
+                                      const SizedBox(height: 12),
+                                      filas.isEmpty
+                                          ? const Padding(
+                                              padding: EdgeInsets.all(24.0),
+                                              child: Center(
+                                                child: Text('Sin productos agregados', style: TextStyle(color: Colors.grey)),
+                                              ),
+                                            )
+                                          : SingleChildScrollView(
+                                              scrollDirection: Axis.horizontal,
+                                              child: DataTable(
+                                                columns: const [
+                                                  DataColumn(label: Text('cod.')),
+                                                  DataColumn(label: Text('Cantidad')),
+                                                  DataColumn(label: Text('Unidad')),
+                                                  DataColumn(label: Text('Producto')),
+                                                  DataColumn(label: Text('P/U')),
+                                                  DataColumn(label: Text('Acciones')),
+                                                ],
+                                                rows: [
+                                                  for (int i = 0; i < filas.length; i++)
+                                                    DataRow(
+                                                      cells: [
+                                                        DataCell(Text(filas[i]['cod'] as String)),
+                                                        DataCell(Row(
+                                                          mainAxisSize: MainAxisSize.min,
+                                                          children: [
+                                                            IconButton(
+                                                              icon: const Icon(Icons.remove),
+                                                              color: Colors.red,
+                                                              iconSize: 18,
+                                                              onPressed: () => _cambiarCantidad(i, -1),
+                                                            ),
+                                                            Text('${filas[i]['cantidad']}'),
+                                                            IconButton(
+                                                              icon: const Icon(Icons.add),
+                                                              color: Colors.green,
+                                                              iconSize: 18,
+                                                              onPressed: () => _cambiarCantidad(i, 1),
+                                                            ),
+                                                          ],
+                                                        )),
+                                                        DataCell(Text(filas[i]['unidad'].toString())),
+                                                        DataCell(Text(filas[i]['producto'].toString())),
+                                                        DataCell(
+                                                          SizedBox(
+                                                            width: 80, // Ancho fijo para el campo de precio
+                                                            child: TextField(
+                                                              controller: filas[i]['precio_controller'] as TextEditingController,
+                                                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                                              decoration: const InputDecoration(border: InputBorder.none, prefixText: '\$'),
+                                                              onChanged: (_) => setState(() {}), // Para que el total se actualice en tiempo real
+                                                            ),
+                                                          ),
+                                                        ),
+                                                        DataCell(
+                                                          IconButton(
+                                                            icon: const Icon(Icons.delete),
+                                                            color: Colors.red,
+                                                            onPressed: () => _eliminar(i),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    )
+                                                ],
+                                              ),
+                                            ),
+                                    ],
+                                  ),
+                                ),
+
+                                const SizedBox(height: 16),
+
+                                // Total
+                                _CardWrap(
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      const Text('TOTAL', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF0F766E),
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        child: Text(
+                                          '\$${total.toStringAsFixed(2)}',
+                                          style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800),
                                         ),
                                       ),
                                     ],
-                                  )
+                                  ),
+                                ),
+
+                                const SizedBox(height: 16),
+
+                                // Botones de acción
+                                LayoutBuilder(
+                                  builder: (context, c) {
+                                    return GridView.count(
+                                      crossAxisCount: 3,
+                                      crossAxisSpacing: 10,
+                                      mainAxisSpacing: 10,
+                                      childAspectRatio: 3.6,
+                                      shrinkWrap: true,
+                                      physics: const NeverScrollableScrollPhysics(),
+                                      children: [
+                                        _actionBtnModern(
+                                          icon: Icons.save_outlined,
+                                          text: 'GUARDAR LOCALMENTE',
+                                          background: const Color(0xFF6C757D),
+                                          border: const Color(0xFF495057),
+                                          onPressed: () => _snack('Guardado localmente', color: Colors.green),
+                                        ),
+                                        _actionBtnModern(
+                                          icon: Icons.cloud_upload_outlined,
+                                          text: 'GUARDAR',
+                                          background: const Color(0xFF1E3A8A),
+                                          border: const Color(0xFF1D4ED8),
+                                          onPressed: _guardarEmbarqueEnServidor,
+                                        ),
+                                        _actionBtnModern(
+                                          icon: Icons.print_outlined,
+                                          text: 'IMPRIMIR',
+                                          background: const Color(0xFF0F766E),
+                                          border: const Color(0xFF115E59),
+                                          onPressed: () => _snack('Enviando a impresión (demo)', color: Colors.teal),
+                                        ),
+                                      ],
+                                    );
+                                  },
+                                ),
                               ],
                             ),
                           ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 16),
-
-              // Total
-              _CardWrap(
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('TOTAL', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF0F766E),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        '\$${total.toStringAsFixed(2)}',
-                        style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800),
+                          // --- Pestaña 2: Consulta ---
+                          Padding(
+                            padding: const EdgeInsets.all(16.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                // --- Filtros ---
+                                _buildFiltrosConsulta(),
+                                const SizedBox(height: 16),
+                                // --- Resultados ---
+                                Expanded(
+                                  child: _isConsultando
+                                      ? const Center(child: CircularProgressIndicator())
+                                      : _embarquesConsultados.isEmpty
+                                          ? const Center(child: Text('No se encontraron embarques para la fecha seleccionada.'))
+                                          : _buildTablaResultados(),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
                 ),
               ),
-
-              const SizedBox(height: 16),
-
-              // Botones de acción
-              LayoutBuilder(
-                builder: (context, c) {
-                  return GridView.count(
-                    crossAxisCount: 3,
-                    crossAxisSpacing: 10,
-                    mainAxisSpacing: 10,
-                    childAspectRatio: 3.6,
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    children: [
-                      _actionBtnModern(
-                        icon: Icons.save_outlined,
-                        text: 'GUARDAR LOCALMENTE',
-                        background: const Color(0xFF6C757D),
-                        border: const Color(0xFF495057),
-                        onPressed: () => _snack('Guardado localmente', color: Colors.green),
-                      ),
-                      _actionBtnModern(
-                        icon: Icons.cloud_upload_outlined,
-                        text: 'GUARDAR',
-                        background: const Color(0xFF1E3A8A),
-                        border: const Color(0xFF1D4ED8),
-                        onPressed: _guardarEmbarqueEnServidor,
-                      ),
-                      _actionBtnModern(
-                        icon: Icons.print_outlined,
-                        text: 'IMPRIMIR',
-                        background: const Color(0xFF0F766E),
-                        border: const Color(0xFF115E59),
-                        onPressed: () => _snack('Enviando a impresión (demo)', color: Colors.teal),
-                      ),
-                    ],
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -792,6 +938,102 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // --- Widgets para la Pestaña de Consulta ---
+
+  Widget _buildFiltrosConsulta() {
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.calendar_today, color: Colors.grey),
+                const SizedBox(width: 8),
+                Text(
+                  "${_fechaFiltro.day}/${_fechaFiltro.month}/${_fechaFiltro.year}",
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.edit_calendar_outlined, color: Color(0xFF1E3A8A)),
+                  onPressed: () async {
+                    final DateTime? picked = await showDatePicker(
+                      context: context,
+                      initialDate: _fechaFiltro,
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime(2030),
+                    );
+                    if (picked != null && picked != _fechaFiltro) {
+                      setState(() {
+                        _fechaFiltro = picked;
+                      });
+                    }
+                  },
+                ),
+              ],
+            ),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.search, size: 18),
+              label: const Text('BUSCAR'),
+              onPressed: () => _consultarEmbarques(),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1E3A8A),
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTablaResultados() {
+    return Card(
+      elevation: 2,
+      clipBehavior: Clip.antiAlias,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
+          columns: const [
+            DataColumn(label: Text('Folio')),
+            DataColumn(label: Text('Fecha')),
+            DataColumn(label: Text('Cliente')),
+            DataColumn(label: Text('Vendedor')),
+            DataColumn(label: Text('Almacenista')),
+            DataColumn(label: Text('Estado')),
+            DataColumn(label: Text('Acciones')),
+          ],
+          rows: _embarquesConsultados.map((embarque) {
+            return DataRow(
+              cells: [
+                DataCell(Text(embarque.idfolioembarque.toString())),
+                DataCell(Text(embarque.regtimestamp.split(' ').first)), // Mostrar solo la fecha
+                DataCell(Text(embarque.nombre_cliente)),
+                DataCell(Text(embarque.nombrevendedor)),
+                DataCell(Text(embarque.nombre_almacenista)),
+                DataCell(
+                  Icon(
+                    embarque.esActivo ? Icons.check_circle : Icons.cancel,
+                    color: embarque.esActivo ? Colors.green : Colors.red,
+                  ),
+                ),
+                DataCell(Row(
+                  children: [
+                    IconButton(icon: const Icon(Icons.edit_outlined), color: Colors.blue, onPressed: () { /* TODO: Lógica de Editar */ }),
+                    IconButton(icon: const Icon(Icons.delete_outline), color: Colors.red, onPressed: () { /* TODO: Lógica de Cancelar */ }),
+                    IconButton(icon: const Icon(Icons.print_outlined), color: Colors.grey, onPressed: () { /* TODO: Lógica de Imprimir */ }),
+                  ],
+                )),
+              ],
+            );
+          }).toList(),
+        ),
       ),
     );
   }

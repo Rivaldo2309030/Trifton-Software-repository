@@ -15,18 +15,18 @@ if ($conn->connect_error) {
   die(json_encode(['error' => "Connection failed: " . $conn->connect_error]));
 }
 
-// Consulta para obtener los almacenes
-$sql = "SELECT idalmacen, nombrealmacen FROM almacenes WHERE estado = 1 ORDER BY nombrealmacen ASC";
+// Consulta para obtener los vendedores
+$sql = "SELECT idvendedor, nombrevendedor FROM vendedores WHERE estado = 1 ORDER BY nombrevendedor ASC";
 $result = $conn->query($sql);
 
-$almacenes = [];
+$vendedores = [];
 if ($result->num_rows > 0) {
   while($row = $result->fetch_assoc()) {
-    $almacenes[] = $row;
+    $vendedores[] = $row;
   }
 }
 
-echo json_encode($almacenes);
+echo json_encode($vendedores);
 
 $conn->close();
 ?>

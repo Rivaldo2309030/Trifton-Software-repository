@@ -17,7 +17,7 @@ if ($conn->connect_error) {
 }
 
 try {
-    $sql = "SELECT idcliente, nombre_cliente FROM clientes ORDER BY nombre_cliente ASC";
+    $sql = "SELECT idcliente, nombrecliente FROM clientes WHERE estado = 1 ORDER BY nombrecliente ASC";
     $result = $conn->query($sql);
 
     $clientes = [];

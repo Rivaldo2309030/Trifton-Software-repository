@@ -1,4 +1,8 @@
 <?php
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
 header("Access-Control-Allow-Origin: *");
 header("Content-Type: application/json; charset=UTF-8");
 
@@ -18,15 +22,12 @@ if ($conn->connect_error) {
 
 try {
     // Use the correct column names 'nombre' and 'precio'
-    $sql = "SELECT idproducto, nombre, precio FROM productos ORDER BY nombre ASC";
+    $sql = "SELECT idproducto, nombreproducto FROM productos WHERE estado = 1 ORDER BY nombreproducto ASC";
     $result = $conn->query($sql);
 
     $productos = [];
     if ($result->num_rows > 0) {
         while($row = $result->fetch_assoc()) {
-            // Ensure numeric types are correctly cast
-            $row['idproducto'] = (int)$row['idproducto'];
-            $row['precio'] = (float)$row['precio'];
             $productos[] = $row;
         }
     }

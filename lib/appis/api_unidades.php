@@ -18,7 +18,7 @@ if ($conn->connect_error) {
 
 try {
     // Consulta corregida: cambié 'unidad' a 'nombre_unidad'
-    $sql = "SELECT idunidad, nombre_unidad FROM unidades";
+    $sql = "SELECT idunidad, nombreunidad FROM unidades";
     $result = $conn->query($sql);
 
     $unidades = [];

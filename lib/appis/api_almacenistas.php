@@ -17,7 +17,7 @@ if ($conn->connect_error) {
 }
 
 try {
-    $sql = "SELECT idalmacenista, nombre_almacen FROM almacenista ORDER BY nombre_almacen ASC";
+    $sql = "SELECT idalmacenista, nombre FROM almacenistas WHERE estado = 1 ORDER BY nombre ASC";
     $result = $conn->query($sql);
 
     $almacenistas = [];

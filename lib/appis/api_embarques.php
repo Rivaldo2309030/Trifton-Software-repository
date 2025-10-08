@@ -1,102 +1,99 @@
 <?php
-header("Access-Control-Allow-Origin: *");
-header("Content-Type: application/json; charset=UTF-8");
+header('Content-Type: application/json');
 
-mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
-
+// Configuración de la base de datos
 $servername = "srv571.hstgr.io";
 $username = "u203835291_serviceOrder";
 $password = "TritonSrv2025$%";
 $dbname = "u203835291_orders";
 
+// Crear conexión
 $conn = new mysqli($servername, $username, $password, $dbname);
 
+// Verificar conexión
 if ($conn->connect_error) {
     http_response_code(500);
-    die(json_encode(["error" => "Connection failed: " . $conn->connect_error]));
+    die(json_encode(['error' => 'Connection failed: ' . $conn->connect_error]));
 }
 
-$method = $_SERVER['REQUEST_METHOD'];
-
-if ($method === 'GET') {
-    $sql = "SELECT e.idembarque, e.fecha, e.total,\n                   a.nombre_almacen,\n                   c.nombre_cliente,\n                   u.nombre_unidad\n            FROM embarques e\n            JOIN almacen a ON e.idalmacen = a.idalmacen\n            JOIN clientes c ON e.idcliente = c.idcliente\n            JOIN unidades u ON e.idunidad = u.idunidad\n            ORDER BY e.idembarque DESC";
-    $result = $conn->query($sql);
-
-    if ($result->num_rows > 0) {
-        $embarques = [];
-        while ($row = $result->fetch_assoc()) {
-            $embarques[] = $row;
-        }
-        http_response_code(200);
-        echo json_encode(["success" => true, "data" => $embarques]);
-    } else {
-        http_response_code(200);
-        echo json_encode(["success" => false, "message" => "No se encontraron embarques."]);
-    }
+// Solo aceptamos POST
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    die(json_encode(['error' => 'Method Not Allowed']));
 }
 
-if ($method === 'POST') {
-    $input = json_decode(file_get_contents("php://input"), true);
+// Leer el JSON de entrada
+$input = json_decode(file_get_contents('php://input'), true);
 
-    if (!$input) {
+// Validar campos principales
+$required_fields = ['idalmacen', 'idvendedor', 'idalmacenista', 'idcliente', 'detalles'];
+foreach ($required_fields as $field) {
+    if (empty($input[$field])) {
         http_response_code(400);
-        echo json_encode(["error" => "JSON inválido"]);
-        exit;
-    }
-
-    // --- CAMPOS REQUERIDOS ---
-    $required_fields = ['idalmacen', 'idalmacenista', 'idunidad', 'idcliente', 'total'];
-    foreach ($required_fields as $field) {
-        if (!isset($input[$field])) {
-            http_response_code(400);
-            echo json_encode(["success" => false, "error" => "Falta el campo requerido: " . $field]);
-            exit;
-        }
-    }
-
-    // --- CAMPOS ADICIONALES (los que sí se llenan en el formulario) ---
-    $camion_chofer = $input['camion_chofer'] ?? null;
-    $tipo_movimiento = $input['tipo_movimiento'] ?? null;
-    $motivo_cancelacion = $input['motivo_cancelacion'] ?? null;
-
-    // --- Asignación de variables ---
-    $idalmacen = $input['idalmacen'];
-    $idalmacenista = $input['idalmacenista'];
-    $idunidad = $input['idunidad'];
-    $idcliente = $input['idcliente'];
-    $total = $input['total'];
-
-    // --- ACTUALIZACIÓN DE LA CONSULTA SQL ---
-    // Se quitan los campos automáticos (estatus, fecha_salida) y se pone un valor por defecto para estado_proceso
-    $sql = "INSERT INTO embarques (
-                idalmacen, idalmacenista, idunidad, idcliente, total,
-                camion_chofer, tipo_movimiento, motivo_cancelacion,
-                estado_proceso, reg_timestamp, estado_registro
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Activo', NOW(), 1)";
-
-    try {
-        $stmt = $conn->prepare($sql);
-        // --- ACTUALIZACIÓN DE BIND_PARAM ---
-        // i: integer, d: double, s: string
-        $stmt->bind_param("iiiidsss",
-            $idalmacen, $idalmacenista, $idunidad, $idcliente, $total,
-            $camion_chofer, $tipo_movimiento, $motivo_cancelacion
-        );
-
-        if ($stmt->execute()) {
-            $newId = $conn->insert_id;
-            http_response_code(201);
-            echo json_encode(["success" => true, "idembarque" => $newId]);
-        } else {
-            http_response_code(500);
-            echo json_encode(["success" => false, "error" => $stmt->error]);
-        }
-        $stmt->close();
-    } catch (mysqli_sql_exception $e) {
-        http_response_code(500);
-        echo json_encode(["success" => false, "error" => "Error SQL: " . $e->getMessage()]);
+        die(json_encode(['error' => 'Falta el campo requerido: ' . $field]));
     }
 }
 
+// Validar que los detalles no estén vacíos y tengan la estructura correcta
+if (!is_array($input['detalles']) || empty($input['detalles'])) {
+    http_response_code(400);
+    die(json_encode(['error' => 'El campo detalles debe ser un array con al menos un producto.']));
+}
+
+// Iniciar transacción
+$conn->begin_transaction();
+
+try {
+    // 1. Insertar en la tabla 'embarque'
+    $sql_embarque = "INSERT INTO embarque (idalmacen, idvendedor, idalmacenista, idcliente) VALUES (?, ?, ?, ?)";
+    $stmt_embarque = $conn->prepare($sql_embarque);
+    $stmt_embarque->bind_param("iiii", $input['idalmacen'], $input['idvendedor'], $input['idalmacenista'], $input['idcliente']);
+    $stmt_embarque->execute();
+
+    // 2. Obtener el ID del embarque recién creado
+    $idfolioembarque = $conn->insert_id;
+
+    // 3. Preparar la inserción para 'embarque_detalle'
+    $sql_detalle = "INSERT INTO embarque_detalle (idfolioembarque, idproducto, idunidad, cantidad, preciounitario, subtotal, idestatus) VALUES (?, ?, ?, ?, ?, ?, ?)";
+    $stmt_detalle = $conn->prepare($sql_detalle);
+
+    // 4. Iterar y guardar los detalles
+    foreach ($input['detalles'] as $detalle) {
+        if (empty($detalle['idproducto']) || empty($detalle['idunidad']) || !isset($detalle['cantidad']) || !isset($detalle['preciounitario'])) {
+            throw new Exception('Cada producto en detalles debe tener idproducto, idunidad, cantidad y preciounitario.');
+        }
+        
+        $cantidad = (float)$detalle['cantidad'];
+        $precio = (float)$detalle['preciounitario'];
+        $subtotal = $cantidad * $precio;
+        $idestatus = 1; // Asignar un estatus por defecto
+
+        $stmt_detalle->bind_param("iiiddsi", 
+            $idfolioembarque, 
+            $detalle['idproducto'], 
+            $detalle['idunidad'], 
+            $cantidad, 
+            $precio, 
+            $subtotal,
+            $idestatus
+        );
+        $stmt_detalle->execute();
+    }
+
+    // 5. Si todo fue bien, confirmar la transacción
+    $conn->commit();
+
+    http_response_code(201);
+    echo json_encode(['success' => true, 'message' => 'Embarque creado correctamente.', 'idfolioembarque' => $idfolioembarque]);
+
+} catch (Exception $e) {
+    // 6. Si algo falló, revertir la transacción
+    $conn->rollback();
+    http_response_code(500);
+    die(json_encode(['error' => 'Error al guardar el embarque: ' . $e->getMessage()]));
+}
+
+$stmt_embarque->close();
+$stmt_detalle->close();
 $conn->close();
 ?>
