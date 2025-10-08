@@ -1,5 +1,5 @@
 <?php
-ini_set('display_errors', 1);
+ini_set('display_errors', 1); // Cambiar a 0 en producción
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
@@ -28,24 +28,22 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 $input = json_decode(file_get_contents("php://input"), true);
 
-// Validar campos requeridos
-$required_fields = ['id_embarque', 'id_usuario', 'id_cliente', 'id_almacen', 'detalles'];
-foreach ($required_fields as $field) {
-    if (empty($input[$field])) {
-        http_response_code(400);
-        die(json_encode(['error' => 'Falta el campo requerido: ' . $field]));
-    }
-}
-
-if (!is_array($input['detalles']) || empty($input['detalles'])) {
-    http_response_code(400);
-    die(json_encode(['error' => 'El campo detalles debe ser un array con al menos un producto.']));
-}
-
 // Iniciar transacción
 $conn->begin_transaction();
 
 try {
+    // Validar campos requeridos
+    $required_fields = ['id_embarque', 'id_usuario', 'id_cliente', 'id_almacen', 'detalles'];
+    foreach ($required_fields as $field) {
+        if (empty($input[$field])) {
+            throw new Exception('Falta el campo requerido: ' . $field);
+        }
+    }
+
+    if (!is_array($input['detalles']) || empty($input['detalles'])) {
+        throw new Exception('El campo detalles debe ser un array con al menos un producto.');
+    }
+
     // 1. Calcular el total y el saldo a partir de los detalles
     $total = 0;
     foreach ($input['detalles'] as $detalle) {
@@ -53,12 +51,13 @@ try {
         $precio = (float)$detalle['precio'];
         $total += $cantidad * $precio;
     }
-    $saldo = $total; // Al crear la nota, el saldo es el total
+    $saldo = $total;
 
     // 2. Insertar en la tabla `notas`
-    $sql_nota = "INSERT INTO notas (idusuario, idcliente, idalmacen, idembarque, total, saldo, fechapago) VALUES (?, ?, ?, ?, ?, ?, NOW())"; // Asumimos fechapago es ahora, se puede ajustar
+    $sql_nota = "INSERT INTO notas (idusuario, idcliente, idalmacen, idembarque, total, saldo, fechapago) VALUES (?, ?, ?, ?, ?, ?, NOW())";
     $stmt_nota = $conn->prepare($sql_nota);
-    $stmt_nota->bind_param("iiidd", 
+    // CORRECCIÓN: Se cambió "iiidd" a "iiiidd" para que coincida con los 6 parámetros
+    $stmt_nota->bind_param("iiiidd", 
         $input['id_usuario'], 
         $input['id_cliente'], 
         $input['id_almacen'], 
@@ -67,15 +66,13 @@ try {
         $saldo
     );
     $stmt_nota->execute();
-
-    // 3. Obtener el ID de la nota recién creada
     $idnota = $conn->insert_id;
 
-    // 4. Preparar la inserción para `nota_detalle`
+    // 3. Preparar la inserción para `nota_detalle`
     $sql_detalle = "INSERT INTO nota_detalle (idnota, idproducto, idunidad, precio, total) VALUES (?, ?, ?, ?, ?)";
     $stmt_detalle = $conn->prepare($sql_detalle);
 
-    // 5. Iterar y guardar los detalles de la nota
+    // 4. Iterar y guardar los detalles de la nota
     foreach ($input['detalles'] as $detalle) {
         $cantidad = (float)$detalle['cantidad'];
         $precio = (float)$detalle['precio'];
@@ -91,27 +88,24 @@ try {
         $stmt_detalle->execute();
     }
 
-    // 6. (Opcional) Actualizar el estado del embarque original para marcarlo como procesado
+    // 5. Actualizar el estado del embarque original
     $sql_update_embarque = "UPDATE embarque SET estado = 2 WHERE idfolioembarque = ?"; // Asumimos que estado 2 = Procesado
     $stmt_update = $conn->prepare($sql_update_embarque);
     $stmt_update->bind_param("i", $input['id_embarque']);
     $stmt_update->execute();
 
-    // 7. Si todo fue bien, confirmar la transacción
+    // 6. Confirmar la transacción
     $conn->commit();
 
     http_response_code(201);
     echo json_encode(['success' => true, 'message' => 'Nota creada correctamente.', 'idnota' => $idnota]);
 
 } catch (Exception $e) {
-    // 8. Si algo falló, revertir la transacción
     $conn->rollback();
+    $errorMessage = 'Error en transacción: ' . $e->getMessage();
     http_response_code(500);
-    die(json_encode(['error' => 'Error al generar la nota: ' . $e->getMessage()]));
+    die(json_encode(['error' => $errorMessage]));
 }
 
-$stmt_nota->close();
-$stmt_detalle->close();
-$stmt_update->close();
 $conn->close();
 ?>
