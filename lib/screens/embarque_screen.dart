@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:io';
+import 'package:distribuidora/services/database_helper.dart';
 
 // --- Modelos de Datos Refactorizados ---
 
@@ -333,21 +335,35 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
         },
       );
 
-  Future<void> _guardarEmbarqueEnServidor() async {
-    // Validar que todos los campos del encabezado estén seleccionados
+  // --- Lógica de Guardado (Online/Offline) ---
+
+  void _limpiarFormulario() {
+    setState(() {
+      filas.clear();
+      _selectedAlmacenId = null;
+      _selectedAlmacenistaId = null;
+      _selectedUnidadId = null;
+      _selectedClienteId = null;
+      _selectedProducto = null;
+      _productoAutocompleteCtrl.clear();
+      cantidadCtrl.text = '1';
+      _precioUnitarioDinamico = null;
+    });
+  }
+
+  Map<String, dynamic> _buildPayload() {
     if (_selectedAlmacenId == null ||
         _selectedAlmacenistaId == null ||
         _selectedClienteId == null) {
       _snack('Faltan datos del encabezado.', color: Colors.red);
-      return;
+      return {};
     }
 
     if (filas.isEmpty) {
       _snack('No hay productos en el detalle del embarque.', color: Colors.red);
-      return;
+      return {};
     }
 
-    // Construir el payload para la API
     final List<Map<String, dynamic>> detallesPayload = filas.map((fila) {
       return {
         'idproducto': fila['idproducto'],
@@ -357,13 +373,33 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
       };
     }).toList();
 
-    final Map<String, dynamic> payload = {
+    return {
       'idalmacen': _selectedAlmacenId,
       'idusuario': 1, // TODO: Cambiar por el ID del usuario logueado
       'idalmacenista': _selectedAlmacenistaId,
       'idcliente': _selectedClienteId,
       'detalles': detallesPayload,
     };
+  }
+
+  Future<void> _guardarEmbarqueLocalmente({Map<String, dynamic>? payload}) async {
+    final Map<String, dynamic> dataToSave = payload ?? _buildPayload();
+    if (dataToSave.isEmpty) return;
+
+    try {
+      final dbHelper = DatabaseHelper.instance;
+      final id = await dbHelper.insertEmbarque(dataToSave);
+      _snack('✅ Embarque guardado localmente (ID: $id). Se sincronizará más tarde.', color: Colors.blueGrey);
+      _limpiarFormulario();
+    } catch (e) {
+      _snack('❌ Error al guardar localmente: $e', color: Colors.red);
+      print('Error en _guardarEmbarqueLocalmente: $e');
+    }
+  }
+
+  Future<void> _guardarEmbarqueEnServidor() async {
+    final Map<String, dynamic> payload = _buildPayload();
+    if (payload.isEmpty) return;
 
     const String baseUrl = 'https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/';
     final url = Uri.parse('${baseUrl}api_embarques.php');
@@ -373,31 +409,24 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
         url,
         headers: {'Content-Type': 'application/json; charset=UTF-8'},
         body: jsonEncode(payload),
-      );
+      ).timeout(const Duration(seconds: 10)); // Timeout de 10 segundos
 
       if (response.statusCode == 201) {
         final data = json.decode(response.body);
-        _snack('✅ Embarque guardado exitosamente. Folio: ${data['idfolioembarque']}', color: Colors.green);
-        setState(() {
-          // Limpiar todo el formulario
-          filas.clear();
-          _selectedAlmacenId = null;
-          _selectedAlmacenistaId = null;
-          _selectedUnidadId = null;
-          _selectedClienteId = null;
-          _selectedProducto = null;
-          _productoAutocompleteCtrl.clear();
-          cantidadCtrl.text = '1';
-          _precioUnitarioDinamico = null;
-        });
+        _snack('✅ Embarque guardado en servidor. Folio: ${data['idfolioembarque']}', color: Colors.green);
+        _limpiarFormulario();
       } else {
         final errorData = json.decode(response.body);
-        _snack('❌ Error al guardar: ${errorData['error'] ?? 'Error desconocido'}', color: Colors.red);
-        print('Respuesta del servidor (${response.statusCode}): ${response.body}');
+        _snack('❌ Error del servidor: ${errorData['error'] ?? 'Desconocido'}. Intentando guardado local.', color: Colors.orange);
+        await _guardarEmbarqueLocalmente(payload: payload);
       }
+    } on SocketException catch (_) {
+      _snack('🔌 Sin conexión. Guardando localmente...', color: Colors.orange);
+      await _guardarEmbarqueLocalmente(payload: payload);
     } catch (e) {
-      _snack('❌ Error de conexión: $e', color: Colors.red);
+      _snack('❌ Error inesperado: $e. Guardando localmente...', color: Colors.orange);
       print('Error en _guardarEmbarqueEnServidor: $e');
+      await _guardarEmbarqueLocalmente(payload: payload);
     }
   }
 
@@ -747,7 +776,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
                                           text: 'GUARDAR LOCALMENTE',
                                           background: const Color(0xFF6C757D),
                                           border: const Color(0xFF495057),
-                                          onPressed: () => _snack('Guardado localmente', color: Colors.green),
+                                          onPressed: _guardarEmbarqueLocalmente,
                                         ),
                                         _actionBtnModern(
                                           icon: Icons.cloud_upload_outlined,
