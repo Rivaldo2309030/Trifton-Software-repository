@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:distribuidora/screens/PedidosScreen.dart';
 import 'embarque_screen.dart';
+import 'package:distribuidora/screens/sync_screen.dart';
 
 void main() {
   runApp(const MyApp());
@@ -56,8 +57,6 @@ class MainNavigationScreen extends StatefulWidget {
   @override
   State<MainNavigationScreen> createState() => _MainNavigationScreenState();
 }
-
-import 'package:distribuidora/screens/sync_screen.dart';
 
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _currentIndex = 0;
