@@ -22,6 +22,9 @@ try {
             e.idfolioembarque,
             e.regtimestamp,
             e.estado AS estado_embarque,
+            e.idcliente,
+            e.idalmacen,
+            e.idusuario,
             c.nombrecliente AS nombre_cliente,
             u.nombre AS nombreusuario,
             a.nombre AS nombre_almacenista

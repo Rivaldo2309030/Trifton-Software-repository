@@ -152,6 +152,10 @@ class EmbarqueConsulta {
   final String nombreusuario;
   final String nombre_almacenista;
   final bool esActivo;
+  // IDs añadidos
+  final int idcliente;
+  final int idalmacen;
+  final int idusuario;
 
   EmbarqueConsulta({
     required this.idfolioembarque,
@@ -160,6 +164,9 @@ class EmbarqueConsulta {
     required this.nombreusuario,
     required this.nombre_almacenista,
     required this.esActivo,
+    required this.idcliente,
+    required this.idalmacen,
+    required this.idusuario,
   });
 
   factory EmbarqueConsulta.fromJson(Map<String, dynamic> json) {
@@ -170,6 +177,10 @@ class EmbarqueConsulta {
       nombreusuario: json['nombreusuario'] ?? 'N/A',
       nombre_almacenista: json['nombre_almacenista'] ?? 'N/A',
       esActivo: (int.tryParse(json['estado_embarque'].toString()) ?? 0) == 1,
+      // Parsear los nuevos IDs
+      idcliente: int.tryParse(json['idcliente'].toString()) ?? 0,
+      idalmacen: int.tryParse(json['idalmacen'].toString()) ?? 0,
+      idusuario: int.tryParse(json['idusuario'].toString()) ?? 0,
     );
   }
 }
