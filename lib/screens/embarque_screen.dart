@@ -17,6 +17,20 @@ class Almacen {
       nombre: json['nombrealmacen'],
     );
   }
+
+  factory Almacen.fromDbMap(Map<String, dynamic> map) {
+    return Almacen(
+      id: map['id'],
+      nombre: map['nombre'],
+    );
+  }
+
+  Map<String, dynamic> toDbMap() {
+    return {
+      'id': id,
+      'nombre': nombre,
+    };
+  }
 }
 
 
@@ -31,6 +45,20 @@ class Unidad {
       nombre: json['nombreunidad'],
     );
   }
+
+  factory Unidad.fromDbMap(Map<String, dynamic> map) {
+    return Unidad(
+      id: map['id'],
+      nombre: map['nombre'],
+    );
+  }
+
+  Map<String, dynamic> toDbMap() {
+    return {
+      'id': id,
+      'nombre': nombre,
+    };
+  }
 }
 
 class Cliente {
@@ -43,6 +71,20 @@ class Cliente {
       id: int.tryParse(json['idcliente'].toString()) ?? 0,
       nombre: json['nombrecliente'],
     );
+  }
+
+  factory Cliente.fromDbMap(Map<String, dynamic> map) {
+    return Cliente(
+      id: map['id'],
+      nombre: map['nombre'],
+    );
+  }
+
+  Map<String, dynamic> toDbMap() {
+    return {
+      'id': id,
+      'nombre': nombre,
+    };
   }
 }
 
@@ -57,6 +99,20 @@ class Almacenista {
       nombre: json['nombre'],
     );
   }
+
+  factory Almacenista.fromDbMap(Map<String, dynamic> map) {
+    return Almacenista(
+      id: map['id'],
+      nombre: map['nombre'],
+    );
+  }
+
+  Map<String, dynamic> toDbMap() {
+    return {
+      'id': id,
+      'nombre': nombre,
+    };
+  }
 }
 
 class Producto {
@@ -70,6 +126,20 @@ class Producto {
       id: int.tryParse(json['idproducto'].toString()) ?? 0,
       nombre: json['nombreproducto'],
     );
+  }
+
+  factory Producto.fromDbMap(Map<String, dynamic> map) {
+    return Producto(
+      id: map['id'],
+      nombre: map['nombre'],
+    );
+  }
+
+  Map<String, dynamic> toDbMap() {
+    return {
+      'id': id,
+      'nombre': nombre,
+    };
   }
 }
 
@@ -178,7 +248,37 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
 
   Future<void> _fetchCatalogos() async {
     setState(() { _isLoading = true; });
-    const String baseUrl = 'https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/'; // URL Base
+    await _loadCatalogsFromDb();
+    setState(() { _isLoading = false; });
+    await _syncCatalogsFromServer();
+  }
+
+  Future<void> _loadCatalogsFromDb() async {
+    try {
+      final db = DatabaseHelper.instance;
+      final almacenesData = await db.getCatalog('almacenes_cat');
+      final clientesData = await db.getCatalog('clientes_cat');
+      final productosData = await db.getCatalog('productos_cat');
+      final unidadesData = await db.getCatalog('unidades_cat');
+      final almacenistasData = await db.getCatalog('almacenistas_cat');
+
+      if (mounted) {
+        setState(() {
+          _almacenes = almacenesData.map((map) => Almacen.fromDbMap(map)).toList();
+          _clientes = clientesData.map((map) => Cliente.fromDbMap(map)).toList();
+          _productos = productosData.map((map) => Producto.fromDbMap(map)).toList();
+          _unidades = unidadesData.map((map) => Unidad.fromDbMap(map)).toList();
+          _almacenistas = almacenistasData.map((map) => Almacenista.fromDbMap(map)).toList();
+        });
+      }
+    } catch (e) {
+      _snack('Error al cargar catálogos locales: $e', color: Colors.red);
+    }
+  }
+
+  Future<void> _syncCatalogsFromServer() async {
+    const String baseUrl = 'https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/';
+    final db = DatabaseHelper.instance;
 
     try {
       final responses = await Future.wait([
@@ -191,42 +291,53 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
 
       if (!mounted) return;
 
-      // Revisar cada respuesta individualmente
+      // Almacenes
       if (responses[0].statusCode == 200) {
-        _almacenes = (json.decode(responses[0].body) as List).map((data) => Almacen.fromJson(data)).toList();
-      } else {
-        throw Exception('Fallo al cargar Almacenes (Code: ${responses[0].statusCode}) Body: ${responses[0].body}');
+        final List<dynamic> data = json.decode(responses[0].body);
+        final List<Almacen> almacenes = data.map((item) => Almacen.fromJson(item)).toList();
+        await db.batchUpdateCatalog('almacenes_cat', almacenes.map((e) => e.toDbMap()).toList());
+        if (mounted) setState(() => _almacenes = almacenes);
       }
 
+      // Unidades
       if (responses[1].statusCode == 200) {
-        _unidades = (json.decode(responses[1].body) as List).map((data) => Unidad.fromJson(data)).toList();
-      } else {
-        throw Exception('Fallo al cargar Unidades (Code: ${responses[1].statusCode}) Body: ${responses[1].body}');
+        final List<dynamic> data = json.decode(responses[1].body);
+        final List<Unidad> unidades = data.map((item) => Unidad.fromJson(item)).toList();
+        await db.batchUpdateCatalog('unidades_cat', unidades.map((e) => e.toDbMap()).toList());
+        if (mounted) setState(() => _unidades = unidades);
       }
 
+      // Productos
       if (responses[2].statusCode == 200) {
-        _productos = (json.decode(responses[2].body) as List).map((data) => Producto.fromJson(data)).toList();
-      } else {
-        throw Exception('Fallo al cargar Productos (Code: ${responses[2].statusCode}) Body: ${responses[2].body}');
+        final List<dynamic> data = json.decode(responses[2].body);
+        final List<Producto> productos = data.map((item) => Producto.fromJson(item)).toList();
+        await db.batchUpdateCatalog('productos_cat', productos.map((e) => e.toDbMap()).toList());
+        if (mounted) setState(() => _productos = productos);
       }
 
+      // Clientes
       if (responses[3].statusCode == 200) {
-        _clientes = (json.decode(responses[3].body) as List).map((data) => Cliente.fromJson(data)).toList();
-      } else {
-        throw Exception('Fallo al cargar Clientes (Code: ${responses[3].statusCode}) Body: ${responses[3].body}');
+        final List<dynamic> data = json.decode(responses[3].body);
+        final List<Cliente> clientes = data.map((item) => Cliente.fromJson(item)).toList();
+        await db.batchUpdateCatalog('clientes_cat', clientes.map((e) => e.toDbMap()).toList());
+        if (mounted) setState(() => _clientes = clientes);
       }
 
+      // Almacenistas
       if (responses[4].statusCode == 200) {
-        _almacenistas = (json.decode(responses[4].body) as List).map((data) => Almacenista.fromJson(data)).toList();
-      } else {
-        throw Exception('Fallo al cargar Almacenistas (Code: ${responses[4].statusCode}) Body: ${responses[4].body}');
+        final List<dynamic> data = json.decode(responses[4].body);
+        final List<Almacenista> almacenistas = data.map((item) => Almacenista.fromJson(item)).toList();
+        await db.batchUpdateCatalog('almacenistas_cat', almacenistas.map((e) => e.toDbMap()).toList());
+        if (mounted) setState(() => _almacenistas = almacenistas);
       }
 
+    } on SocketException {
+      print("Sin conexión para sincronizar catálogos. Usando datos locales.");
+      // Falla silenciosamente, los datos locales ya fueron cargados.
     } catch (e) {
-       if (mounted) _snack('Error al cargar catálogos: $e', color: Colors.red);
-       print('Error en _fetchCatalogos: $e');
-    } finally {
-      if (mounted) setState(() { _isLoading = false; });
+      print('Error en _syncCatalogsFromServer: $e');
+      // Opcional: mostrar un snackbar no intrusivo
+      // _snack('No se pudieron sincronizar los catálogos.', color: Colors.orange);
     }
   }
 
