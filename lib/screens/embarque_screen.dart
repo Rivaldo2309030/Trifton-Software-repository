@@ -347,16 +347,40 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
       return;
     }
 
+    final db = DatabaseHelper.instance;
+    final idCliente = _selectedClienteId!;
+    final idProducto = _selectedProducto!.id;
+    final idUnidad = _selectedUnidadId!;
+
+    // 1. Intentar obtener el precio del caché local
+    final localPrice = await db.getPrecio(idCliente, idProducto, idUnidad);
+
+    if (localPrice != null) {
+      setState(() {
+        _precioUnitarioDinamico = localPrice;
+      });
+      return; // Precio encontrado en caché, no es necesario ir al servidor
+    }
+
+    // 2. Si no está en caché, ir al servidor
     const String baseUrl = 'https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/';
-    final url = Uri.parse('${baseUrl}api_precios.php?idcliente=$_selectedClienteId&idproducto=${_selectedProducto!.id}&idunidad=$_selectedUnidadId');
+    final url = Uri.parse('${baseUrl}api_precios.php?idcliente=$idCliente&idproducto=$idProducto&idunidad=$idUnidad');
 
     try {
       final response = await http.get(url).timeout(const Duration(seconds: 5));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data['preciounitario'] != null) {
+          final serverPrice = (data['preciounitario'] as num).toDouble();
           setState(() {
-            _precioUnitarioDinamico = (data['preciounitario'] as num).toDouble();
+            _precioUnitarioDinamico = serverPrice;
+          });
+          // 3. Guardar el precio recién obtenido en el caché local
+          await db.insertOrUpdatePrecio({
+            'idcliente': idCliente,
+            'idproducto': idProducto,
+            'idunidad': idUnidad,
+            'preciounitario': serverPrice,
           });
         } else {
           _snack('No se encontró un precio para esta combinación. Se usará 0.0.', color: Colors.orange);

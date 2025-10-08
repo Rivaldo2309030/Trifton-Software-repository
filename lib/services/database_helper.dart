@@ -56,6 +56,17 @@ class DatabaseHelper {
     await db.execute('CREATE TABLE productos_cat (id INTEGER PRIMARY KEY, nombre TEXT NOT NULL)');
     await db.execute('CREATE TABLE unidades_cat (id INTEGER PRIMARY KEY, nombre TEXT NOT NULL)');
     await db.execute('CREATE TABLE almacenistas_cat (id INTEGER PRIMARY KEY, nombre TEXT NOT NULL)');
+
+    // --- Precios Table ---
+    await db.execute('''
+      CREATE TABLE precios_cat (
+        idcliente INTEGER NOT NULL,
+        idproducto INTEGER NOT NULL,
+        idunidad INTEGER NOT NULL,
+        preciounitario REAL NOT NULL,
+        PRIMARY KEY (idcliente, idproducto, idunidad)
+      )
+    ''');
   }
 
   // --- Embarque Methods ---
@@ -107,4 +118,29 @@ class DatabaseHelper {
     final db = await database;
     return await db.query(tableName);
   }
-}
+
+  // --- Precios Methods ---
+
+  Future<void> insertOrUpdatePrecio(Map<String, dynamic> precioData) async {
+    final db = await database;
+    await db.insert(
+      'precios_cat',
+      precioData,
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<double?> getPrecio(int idCliente, int idProducto, int idUnidad) async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'precios_cat',
+      columns: ['preciounitario'],
+      where: 'idcliente = ? AND idproducto = ? AND idunidad = ?',
+      whereArgs: [idCliente, idProducto, idUnidad],
+    );
+
+    if (maps.isNotEmpty) {
+      return maps.first['preciounitario'] as double?;
+    }
+    return null;
+  }
