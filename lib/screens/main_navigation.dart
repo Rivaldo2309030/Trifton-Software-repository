@@ -57,6 +57,8 @@ class MainNavigationScreen extends StatefulWidget {
   State<MainNavigationScreen> createState() => _MainNavigationScreenState();
 }
 
+import 'package:distribuidora/screens/sync_screen.dart';
+
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _currentIndex = 0;
 
@@ -64,12 +66,14 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     DashboardScreen(),
     EmbarqueScreen(),
     PedidosScreen(pedidos: []),
+    SyncScreen(), // <-- Pantalla añadida
   ];
 
   final List<String> _titles = const [
     "TRITON SOFTWARE",
     "TRITON SOFTWARE",
     "TRITON SOFTWARE",
+    "SINCRONIZACIÓN", // <-- Título añadido
   ];
 
   @override
@@ -88,7 +92,10 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                 Expanded(
                   child: AnimatedSwitcher(
                     duration: const Duration(milliseconds: 280),
-                    child: _screens[_currentIndex],
+                    child: IndexedStack( // Usar IndexedStack para mantener el estado de las pantallas
+                      index: _currentIndex,
+                      children: _screens,
+                    ),
                   ),
                 ),
               ],
@@ -119,6 +126,11 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           icon: Icon(Icons.shopping_cart_outlined),
           selectedIcon: Icon(Icons.shopping_cart, color: kCorporateBlue),
           label: "Pedidos",
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.sync_alt_outlined),
+          selectedIcon: Icon(Icons.sync_alt, color: kCorporateBlue),
+          label: "Sincronizar",
         ),
       ],
     );
@@ -151,6 +163,11 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           selectedIcon: Icon(Icons.shopping_cart),
           label: Text("Pedidos"),
         ),
+        NavigationRailDestination(
+          icon: Icon(Icons.sync_alt_outlined),
+          selectedIcon: Icon(Icons.sync_alt),
+          label: Text("Sincronizar"),
+        ),
       ],
     );
   }
@@ -180,6 +197,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           _drawerItem(Icons.dashboard_outlined, "Inicio", 0),
           _drawerItem(Icons.local_shipping_outlined, "Embarque", 1),
           _drawerItem(Icons.shopping_cart_outlined, "Pedidos", 2),
+          _drawerItem(Icons.sync_alt_outlined, "Sincronizar", 3),
           const Spacer(),
           const Divider(height: 1),
           _drawerItem(Icons.settings, "Configuración", null),

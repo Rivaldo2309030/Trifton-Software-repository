@@ -162,4 +162,21 @@ class DatabaseHelper {
     }
     return null;
   }
+
+  Future<List<Map<String, dynamic>>> getUnsyncedEmbarques() async {
+    final db = await database;
+    // Usamos un rawQuery para poder hacer el JOIN fácilmente
+    final List<Map<String, dynamic>> result = await db.rawQuery('''
+      SELECT
+        eo.idfolioembarque_local,
+        eo.regtimestamp,
+        cc.nombre AS nombrecliente
+      FROM embarque_offline AS eo
+      LEFT JOIN clientes_cat AS cc ON eo.idcliente = cc.id
+      WHERE eo.synced = 0
+      ORDER BY eo.idfolioembarque_local DESC
+    ''');
+    return result;
+  }
+}
 }
