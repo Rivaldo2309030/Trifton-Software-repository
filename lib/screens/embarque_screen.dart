@@ -343,16 +343,15 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
 
   Future<void> _fetchPrecio() async {
     if (_selectedProducto == null || _selectedClienteId == null || _selectedUnidadId == null) {
-      setState(() => _precioUnitarioDinamico = null); // Limpiar si no hay datos suficientes
+      setState(() => _precioUnitarioDinamico = null);
       return;
     }
 
     const String baseUrl = 'https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/';
-    print('--- Debug Precios: Cliente ID: $_selectedClienteId, Producto ID: ${_selectedProducto?.id}, Unidad ID: $_selectedUnidadId ---');
     final url = Uri.parse('${baseUrl}api_precios.php?idcliente=$_selectedClienteId&idproducto=${_selectedProducto!.id}&idunidad=$_selectedUnidadId');
 
     try {
-      final response = await http.get(url);
+      final response = await http.get(url).timeout(const Duration(seconds: 5));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data['preciounitario'] != null) {
@@ -360,15 +359,18 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
             _precioUnitarioDinamico = (data['preciounitario'] as num).toDouble();
           });
         } else {
-          _snack('No se encontró un precio para la combinación seleccionada.', color: Colors.orange);
-          setState(() => _precioUnitarioDinamico = null);
+          _snack('No se encontró un precio para esta combinación. Se usará 0.0.', color: Colors.orange);
+          setState(() => _precioUnitarioDinamico = 0.0);
         }
       } else {
         throw Exception('Error del servidor: ${response.statusCode}');
       }
+    } on SocketException {
+      _snack('Sin conexión. Ingresa el precio manualmente.', color: Colors.orange);
+      setState(() => _precioUnitarioDinamico = 0.0);
     } catch (e) {
-      _snack('Error al obtener el precio: $e', color: Colors.red);
-      setState(() => _precioUnitarioDinamico = null);
+      _snack('Error al obtener precio: $e. Se usará 0.0.', color: Colors.red);
+      setState(() => _precioUnitarioDinamico = 0.0);
     }
   }
 
@@ -572,6 +574,12 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
           throw Exception('Error de conexión: ${response.statusCode}');
         }
       }
+    } on SocketException {
+        if (mounted) {
+            setState(() {
+                _embarquesConsultados = [];
+            });
+        }
     } catch (e) {
       if (mounted) {
         _snack('Error al consultar embarques: $e', color: Colors.red);
