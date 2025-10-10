@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:distribuidora/services/api_config.dart';
 import 'package:http/http.dart' as http;
 import 'package:distribuidora/services/database_helper.dart';
 import 'package:flutter/material.dart';
@@ -73,8 +74,7 @@ class _SyncScreenState extends State<SyncScreen> {
         throw Exception('No se pudo construir el payload para el embarque local ID: $localId');
       }
 
-      const String baseUrl = 'https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/';
-      final url = Uri.parse('${baseUrl}api_embarques.php');
+      final url = Uri.parse('${ApiConfig.baseUrl}api_embarques.php');
 
       final response = await http.post(
         url,

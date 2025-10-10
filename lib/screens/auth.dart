@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:distribuidora/screens/main_navigation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:distribuidora/services/api_config.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -115,14 +116,12 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _loginUser() async {
     if (!_formKey.currentState!.validate()) return;
 
-    const String url =
-        "https://mediumslateblue-okapi-112468.hostingersite.com/api_softservice/loginUser.php";
+    const String url = ApiConfig.baseUrl + "loginUser.php";
 
     setState(() => _isLoading = true);
     try {
       final response = await http.post(
         Uri.parse(url),
-        headers: {"Content-Type": "application/x-www-form-urlencoded"},
         body: {
           "username": _usernameController.text.trim(),
           "contrasena": _passwordController.text,
@@ -517,8 +516,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Future<void> _registerUser() async {
     if (!_formKey.currentState!.validate()) return;
 
-    const String url =
-        "https://mediumslateblue-okapi-112468.hostingersite.com/api_softservice/registerUser.php";
+    const String url = ApiConfig.baseUrl + "registerUser.php";
 
     setState(() => _isLoading = true);
     try {

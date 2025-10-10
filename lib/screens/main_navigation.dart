@@ -70,7 +70,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   final List<Widget> _screens = const [
     DashboardScreen(),
     EmbarqueScreen(),
-    PedidosScreen(pedidos: []),
+    PedidosScreen(),
     SyncScreen(), // <-- Pantalla añadida
   ];
 

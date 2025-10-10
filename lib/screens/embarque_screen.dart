@@ -1,8 +1,12 @@
+import 'package:distribuidora/screens/auth.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io';
 import 'package:distribuidora/services/database_helper.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:distribuidora/services/api_config.dart';
 
 // --- Modelos de Datos Refactorizados ---
 
@@ -196,6 +200,9 @@ class EmbarqueScreen extends StatefulWidget {
 class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
 
+  // --- Info de Usuario ---
+  String _username = 'Usuario';
+
   // --- Estado para la pestaña de Consulta ---
   List<EmbarqueConsulta> _embarquesConsultados = [];
   bool _isConsultando = true;
@@ -231,6 +238,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _loadUserData();
     _fetchCatalogos();
     _consultarEmbarques(); // Carga inicial para la pestaña de consulta
 
@@ -255,6 +263,26 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
       (fila['precio_controller'] as TextEditingController).dispose();
     }
     super.dispose();
+  }
+
+  Future<void> _loadUserData() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _username = prefs.getString('username') ?? 'Usuario';
+    });
+  }
+
+  Future<void> _logout() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('idusuario');
+    await prefs.remove('username');
+
+    if (mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const LoginScreen()),
+        (Route<dynamic> route) => false,
+      );
+    }
   }
 
   Future<void> _fetchCatalogos() async {
@@ -288,16 +316,15 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
   }
 
   Future<void> _syncCatalogsFromServer() async {
-    const String baseUrl = 'https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/';
     final db = DatabaseHelper.instance;
 
     try {
       final responses = await Future.wait([
-        http.get(Uri.parse('${baseUrl}api_almacenes.php')),
-        http.get(Uri.parse('${baseUrl}api_unidades.php')),
-        http.get(Uri.parse('${baseUrl}api_productos.php')),
-        http.get(Uri.parse('${baseUrl}api_clientes.php')),
-        http.get(Uri.parse('${baseUrl}api_almacenistas.php')),
+        http.get(Uri.parse('${ApiConfig.baseUrl}api_almacenes.php')),
+        http.get(Uri.parse('${ApiConfig.baseUrl}api_unidades.php')),
+        http.get(Uri.parse('${ApiConfig.baseUrl}api_productos.php')),
+        http.get(Uri.parse('${ApiConfig.baseUrl}api_clientes.php')),
+        http.get(Uri.parse('${ApiConfig.baseUrl}api_almacenistas.php')),
       ]);
 
       if (!mounted) return;
@@ -374,8 +401,9 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
     }
 
     // 2. Si no está en caché, ir al servidor
-    const String baseUrl = 'https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/';
-    final url = Uri.parse('${baseUrl}api_precios.php?idcliente=$idCliente&idproducto=$idProducto&idunidad=$idUnidad');
+    final url = Uri.parse('${ApiConfig.baseUrl}api_precios.php?idcliente=$idCliente&idproducto=$idProducto&idunidad=$idUnidad');
+
+    print('--- BUSCANDO PRECIO CON URL: $url ---'); // Linea de depuración
 
     try {
       final response = await http.get(url).timeout(const Duration(seconds: 5));
@@ -448,7 +476,8 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
         'producto': _selectedProducto!.nombre,
         'precio_controller': TextEditingController(text: _precioUnitarioDinamico!.toStringAsFixed(2)),
         'idproducto': _selectedProducto!.id,
-        'idunidad': _selectedUnidadId, // Guardamos también el id de unidad para el guardado final
+        'idunidad': _selectedUnidadId, 
+        'idestatus': 1, // ID de estatus por defecto 'EE'
       });
       
       // Limpiar controles
@@ -499,7 +528,15 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
     });
   }
 
-  Map<String, dynamic> _buildPayload() {
+  Future<Map<String, dynamic>> _buildPayload() async {
+    final prefs = await SharedPreferences.getInstance();
+    final idUsuario = prefs.getInt('idusuario');
+
+    if (idUsuario == null) {
+      _snack('Error crítico: No se pudo identificar al usuario. Vuelve a iniciar sesión.', color: Colors.red);
+      return {};
+    }
+
     if (_selectedAlmacenId == null ||
         _selectedAlmacenistaId == null ||
         _selectedClienteId == null) {
@@ -518,12 +555,13 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
         'idunidad': fila['idunidad'],
         'cantidad': fila['cantidad'],
         'preciounitario': double.tryParse((fila['precio_controller'] as TextEditingController).text) ?? 0.0,
+        'idestatus': fila['idestatus'], // Añadido para el guardado
       };
     }).toList();
 
     return {
       'idalmacen': _selectedAlmacenId,
-      'idusuario': 1, // TODO: Cambiar por el ID del usuario logueado
+      'idusuario': idUsuario, // ID de usuario obtenido de SharedPreferences
       'idalmacenista': _selectedAlmacenistaId,
       'idcliente': _selectedClienteId,
       'detalles': detallesPayload,
@@ -531,7 +569,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
   }
 
   Future<void> _guardarEmbarqueLocalmente({Map<String, dynamic>? payload}) async {
-    final Map<String, dynamic> dataToSave = payload ?? _buildPayload();
+    final Map<String, dynamic> dataToSave = payload ?? await _buildPayload();
     if (dataToSave.isEmpty) return;
 
     try {
@@ -546,11 +584,10 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
   }
 
   Future<void> _guardarEmbarqueEnServidor() async {
-    final Map<String, dynamic> payload = _buildPayload();
+    final Map<String, dynamic> payload = await _buildPayload();
     if (payload.isEmpty) return;
 
-    const String baseUrl = 'https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/';
-    final url = Uri.parse('${baseUrl}api_embarques.php');
+    final url = Uri.parse('${ApiConfig.baseUrl}api_embarques.php');
 
     try {
       final response = await http.post(
@@ -565,16 +602,30 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
         _limpiarFormulario();
       } else {
         final errorData = json.decode(response.body);
-        _snack('❌ Error del servidor: ${errorData['error'] ?? 'Desconocido'}. Intentando guardado local.', color: Colors.orange);
-        await _guardarEmbarqueLocalmente(payload: payload);
+        final errorMessage = '❌ Error del servidor: ${errorData['error'] ?? 'Desconocido'}.';
+        if (kIsWeb) {
+          _snack(errorMessage, color: Colors.red);
+        } else {
+          _snack('$errorMessage Intentando guardado local.', color: Colors.orange);
+          await _guardarEmbarqueLocalmente(payload: payload);
+        }
       }
     } on SocketException catch (_) {
-      _snack('🔌 Sin conexión. Guardando localmente...', color: Colors.orange);
-      await _guardarEmbarqueLocalmente(payload: payload);
+      if (kIsWeb) {
+        _snack('🔌 Sin conexión. No se puede guardar en la versión web.', color: Colors.red);
+      } else {
+        _snack('🔌 Sin conexión. Guardando localmente...', color: Colors.orange);
+        await _guardarEmbarqueLocalmente(payload: payload);
+      }
     } catch (e) {
-      _snack('❌ Error inesperado: $e. Guardando localmente...', color: Colors.orange);
-      print('Error en _guardarEmbarqueEnServidor: $e');
-      await _guardarEmbarqueLocalmente(payload: payload);
+      final errorMessage = '❌ Error inesperado: $e.';
+      if (kIsWeb) {
+        _snack(errorMessage, color: Colors.red);
+      } else {
+        _snack('$errorMessage Guardando localmente...', color: Colors.orange);
+        print('Error en _guardarEmbarqueEnServidor: $e');
+        await _guardarEmbarqueLocalmente(payload: payload);
+      }
     }
   }
 
@@ -589,8 +640,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
       final fechaAFiltrar = fecha ?? _fechaFiltro;
       final formattedDate = "${fechaAFiltrar.year}-${fechaAFiltrar.month.toString().padLeft(2, '0')}-${fechaAFiltrar.day.toString().padLeft(2, '0')}";
       
-      const String baseUrl = 'https://mediumslateblue-okapi-112468.hostingersite.com/APIS_RIVALDO/';
-      final url = Uri.parse('${baseUrl}api_consulta_embarques.php?fecha=$formattedDate');
+      final url = Uri.parse('${ApiConfig.baseUrl}api_consulta_embarques.php?fecha=$formattedDate');
       
       final response = await http.get(url);
 
@@ -643,7 +693,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _Header(),
+                    _Header(username: _username, onLogout: _logout),
                     const SizedBox(height: 8),
                     TabBar(
                       controller: _tabController,
@@ -835,6 +885,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
                                                   DataColumn(label: Text('Unidad')),
                                                   DataColumn(label: Text('Producto')),
                                                   DataColumn(label: Text('P/U')),
+                                                  DataColumn(label: Text('Estatus')),
                                                   DataColumn(label: Text('Acciones')),
                                                 ],
                                                 rows: [
@@ -873,6 +924,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
                                                             ),
                                                           ),
                                                         ),
+                                                        const DataCell(Text('EE')), // Mostrar clave de estatus
                                                         DataCell(
                                                           IconButton(
                                                             icon: const Icon(Icons.delete),
@@ -928,9 +980,9 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
                                         _actionBtnModern(
                                           icon: Icons.save_outlined,
                                           text: 'GUARDAR LOCALMENTE',
-                                          background: const Color(0xFF6C757D),
-                                          border: const Color(0xFF495057),
-                                          onPressed: _guardarEmbarqueLocalmente,
+                                          background: kIsWeb ? Colors.grey.shade400 : const Color(0xFF6C757D),
+                                          border: kIsWeb ? Colors.grey.shade500 : const Color(0xFF495057),
+                                          onPressed: kIsWeb ? () => _snack('El guardado local no está disponible en la web.', color: Colors.blue) : _guardarEmbarqueLocalmente,
                                         ),
                                         _actionBtnModern(
                                           icon: Icons.cloud_upload_outlined,
@@ -1195,6 +1247,11 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
 // --------- Secciones visuales ---------
 
 class _Header extends StatelessWidget {
+  final String username;
+  final VoidCallback onLogout;
+
+  const _Header({required this.username, required this.onLogout});
+
   @override
   Widget build(BuildContext context) {
     final Color a = const Color(0xFF0D1B2A);
@@ -1215,12 +1272,36 @@ class _Header extends StatelessWidget {
             style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
           ),
         ),
-        const CircleAvatar(
-          radius: 18,
-          child: Icon(Icons.person_outline),
+        PopupMenuButton<String>(
+          onSelected: (value) {
+            if (value == 'logout') {
+              onLogout();
+            }
+          },
+          itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+            const PopupMenuItem<String>(
+              value: 'logout',
+              child: Row(
+                children: [
+                  Icon(Icons.logout, color: Colors.red),
+                  SizedBox(width: 8),
+                  Text('Cerrar Sesión'),
+                ],
+              ),
+            ),
+          ],
+          child: Row(
+            children: [
+              const CircleAvatar(
+                radius: 18,
+                child: Icon(Icons.person_outline),
+              ),
+              const SizedBox(width: 8),
+              Text('Hola, $username', style: const TextStyle(fontWeight: FontWeight.w600)),
+              const Icon(Icons.arrow_drop_down),
+            ],
+          ),
         ),
-        const SizedBox(width: 8),
-        const Text('Hola Arturo', style: TextStyle(fontWeight: FontWeight.w600)),
       ],
     );
   }

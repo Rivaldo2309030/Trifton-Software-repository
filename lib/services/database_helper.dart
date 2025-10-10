@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
@@ -11,13 +12,20 @@ class DatabaseHelper {
   DatabaseHelper._privateConstructor();
   static final DatabaseHelper instance = DatabaseHelper._privateConstructor();
   static Database? _database;
-  Future<Database> get database async {
+
+  // Devuelve una base de datos nulable. En la web, será null.
+  Future<Database?> get database async {
     if (_database != null) return _database!;
     _database = await _initDatabase();
-    return _database!;
+    return _database;
   }
 
   _initDatabase() async {
+    // Si estamos en la web, no hacemos nada y devolvemos null.
+    if (kIsWeb) {
+      print("Plataforma web detectada, omitiendo inicialización de SQLite.");
+      return null;
+    }
     Directory documentsDirectory = await getApplicationDocumentsDirectory();
     String path = join(documentsDirectory.path, _databaseName);
     return await openDatabase(path,
@@ -89,7 +97,9 @@ class DatabaseHelper {
 
   // --- Embarque Methods ---
   Future<int> insertEmbarque(Map<String, dynamic> payload) async {
-    Database db = await instance.database;
+    Database? db = await instance.database;
+    if (db == null) return -1; // Guard para la web
+
     int embarqueId = -1;
     await db.transaction((txn) async {
       Map<String, dynamic> embarqueRow = {
@@ -124,6 +134,8 @@ class DatabaseHelper {
 
   Future<void> batchUpdateCatalog(String tableName, List<Map<String, dynamic>> items) async {
     final db = await database;
+    if (db == null) return; // Guard para la web
+
     await db.transaction((txn) async {
       await txn.delete(tableName); // Clear old data
       for (final item in items) {
@@ -134,6 +146,8 @@ class DatabaseHelper {
 
   Future<List<Map<String, dynamic>>> getCatalog(String tableName) async {
     final db = await database;
+    if (db == null) return []; // Guard para la web
+
     return await db.query(tableName);
   }
 
@@ -141,6 +155,8 @@ class DatabaseHelper {
 
   Future<void> insertOrUpdatePrecio(Map<String, dynamic> precioData) async {
     final db = await database;
+    if (db == null) return; // Guard para la web
+
     await db.insert(
       'precios_cat',
       precioData,
@@ -150,6 +166,8 @@ class DatabaseHelper {
 
   Future<double?> getPrecio(int idCliente, int idProducto, int idUnidad) async {
     final db = await database;
+    if (db == null) return null; // Guard para la web
+
     final List<Map<String, dynamic>> maps = await db.query(
       'precios_cat',
       columns: ['preciounitario'],
@@ -165,6 +183,8 @@ class DatabaseHelper {
 
   Future<List<Map<String, dynamic>>> getUnsyncedEmbarques() async {
     final db = await database;
+    if (db == null) return []; // Guard para la web
+
     // Usamos un rawQuery para poder hacer el JOIN fácilmente
     final List<Map<String, dynamic>> result = await db.rawQuery('''
       SELECT
@@ -183,6 +203,8 @@ class DatabaseHelper {
 
   Future<Map<String, dynamic>> getFullEmbarque(int localId) async {
     final db = await database;
+    if (db == null) return {}; // Guard para la web
+
     // 1. Obtener la cabecera
     final List<Map<String, dynamic>> headers = await db.query(
       'embarque_offline',
@@ -220,6 +242,8 @@ class DatabaseHelper {
 
   Future<void> deleteLocalEmbarque(int localId) async {
     final db = await database;
+    if (db == null) return; // Guard para la web
+
     await db.delete(
       'embarque_offline',
       where: 'idfolioembarque_local = ?',
