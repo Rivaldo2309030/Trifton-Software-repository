@@ -1,5 +1,8 @@
+import 'package:distribuidora/screens/WelcomeScreen.dart';
+import 'package:distribuidora/screens/auth.dart';
 import 'package:flutter/material.dart';
 import 'package:distribuidora/screens/PedidosScreen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'embarque_screen.dart';
 import 'package:distribuidora/screens/sync_screen.dart';
 
@@ -7,13 +10,36 @@ void main() {
   runApp(const MyApp());
 }
 
-/// COLORES CORPORATIVOS
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'TritonSoftware',
+      theme: ThemeData(primarySwatch: Colors.blue),
+      initialRoute: '/welcome',
+      routes: {
+        '/welcome': (context) => const WelcomeScreen(),
+        '/login': (context) => const LoginScreen(),
+      },
+    );
+  }
+}
+
 const Color kCorporateBlue = Color(0xFF0B2C5D); // Azul marino
 const Color kCorporateBlueDark = Color(0xFF071C3D);
 const Color kAccent = Color(0xFF00B0B9);
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class ShipFormPage extends StatefulWidget {
+  const ShipFormPage({super.key});
+
+  @override
+  State<ShipFormPage> createState() => _ShipFormPageState();
+}
+
+class _ShipFormPageState extends State<ShipFormPage> {
+  final _formKey = GlobalKey<FormState>();
 
   @override
   Widget build(BuildContext context) {
@@ -72,7 +98,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     "TRITON SOFTWARE",
     "TRITON SOFTWARE",
     "TRITON SOFTWARE",
-    "SINCRONIZACIÓN", // <-- Título añadido
+    "SINCRONIZACIÓN",
   ];
 
   @override
@@ -91,7 +117,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                 Expanded(
                   child: AnimatedSwitcher(
                     duration: const Duration(milliseconds: 280),
-                    child: IndexedStack( // Usar IndexedStack para mantener el estado de las pantallas
+                    child: IndexedStack(
+                      // Usar IndexedStack para mantener el estado de las pantallas
                       index: _currentIndex,
                       children: _screens,
                     ),
@@ -100,7 +127,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
               ],
             ),
           ),
-          bottomNavigationBar: isLargeScreen ? null : _buildBottomNavigationBar(),
+          bottomNavigationBar: isLargeScreen
+              ? null
+              : _buildBottomNavigationBar(),
         );
       },
     );
@@ -202,6 +231,23 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           _drawerItem(Icons.settings, "Configuración", null),
           _drawerItem(Icons.help_outline, "Ayuda", null),
           const SizedBox(height: 10),
+
+          ListTile(
+            leading: const Icon(Icons.logout),
+            title: const Text('Cerrar Sesión'),
+            onTap: () async {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.remove('idusuario');
+              await prefs.remove('username');
+              // o: await prefs.clear(); // para borrar todo
+              if (Navigator.canPop(context)) Navigator.pop(context);
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(builder: (_) => const LoginScreen()),
+              );
+            },
+          ),
+          // const Divider(),
           Text(
             "Versión 1.0.0",
             style: TextStyle(color: Colors.grey, fontSize: 12),
@@ -230,7 +276,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   }
 }
 
-/// APPBAR con degradado y título BLANCO
 class _TritonAppBar extends StatelessWidget implements PreferredSizeWidget {
   final String title;
   const _TritonAppBar({required this.title});
@@ -359,8 +404,11 @@ class _WelcomeBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.dashboard_customize_rounded,
-              color: Colors.white, size: 34 * scale),
+          Icon(
+            Icons.dashboard_customize_rounded,
+            color: Colors.white,
+            size: 34 * scale,
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -488,7 +536,11 @@ class _KpiCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    const Icon(Icons.trending_up, color: Colors.white, size: 16),
+                    const Icon(
+                      Icons.trending_up,
+                      color: Colors.white,
+                      size: 16,
+                    ),
                     const SizedBox(width: 2),
                     Text(
                       trend,
