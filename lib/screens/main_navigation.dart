@@ -6,27 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'embarque_screen.dart';
 import 'package:distribuidora/screens/sync_screen.dart';
 
-void main() {
-  runApp(const MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'TritonSoftware',
-      theme: ThemeData(primarySwatch: Colors.blue),
-      initialRoute: '/welcome',
-      routes: {
-        '/welcome': (context) => const WelcomeScreen(),
-        '/login': (context) => const LoginScreen(),
-      },
-    );
-  }
-}
-
+///NO TENER 2 MAIN.DART
 const Color kCorporateBlue = Color(0xFF0B2C5D); // Azul marino
 const Color kCorporateBlueDark = Color(0xFF071C3D);
 const Color kAccent = Color(0xFF00B0B9);
