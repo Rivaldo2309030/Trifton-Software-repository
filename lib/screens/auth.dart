@@ -1,10 +1,12 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:distribuidora/screens/main_navigation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:distribuidora/services/api_config.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:distribuidora/services/database_helper.dart';
 
 /// ====== PALETA (alineada a tus azules) ======
 const kBrandDark = Color(0xFF0D2960);
@@ -15,10 +17,10 @@ class LoginScreen extends StatefulWidget {
   final String? username;
   final String? password;
 
-  const LoginScreen({Key? key, this.username, this.password}) : super(key: key);
+  const LoginScreen({super.key, this.username, this.password});
 
   @override
-  _LoginScreenState createState() => _LoginScreenState();
+  State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
@@ -57,20 +59,19 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  // Verificar si el usuario ya inició sesión
   Future<void> _checkLoginStatus() async {
     final prefs = await SharedPreferences.getInstance();
     final userId = prefs.getInt('idusuario');
 
     if (userId != null) {
+      if (!mounted) return;
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) => ShipFormPage()),
+        MaterialPageRoute(builder: (context) => const MainNavigationScreen()),
       );
     }
   }
 
-  // Diálogo de éxito
   void _showSuccessDialogWithIcon(String message) {
     showDialog(
       context: context,
@@ -84,7 +85,7 @@ class _LoginScreenState extends State<LoginScreen> {
           title: Column(
             children: const [
               Icon(
-                Icons.local_shipping_rounded, // ICONO DE EMBARQUE
+                Icons.local_shipping_rounded,
                 color: kBrandDark,
                 size: 52,
               ),
@@ -116,7 +117,7 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _loginUser() async {
     if (!_formKey.currentState!.validate()) return;
 
-    const String url = ApiConfig.baseUrl + "loginUser.php";
+    final String url = '${ApiConfig.baseUrl}loginUser.php';
 
     setState(() => _isLoading = true);
     try {
@@ -142,13 +143,21 @@ class _LoginScreenState extends State<LoginScreen> {
           await prefs.setInt("idusuario", userId);
           await prefs.setString("username", username);
 
+          final dbHelper = DatabaseHelper.instance;
+          await dbHelper.saveUserCredentials(
+            userId,
+            _usernameController.text.trim(),
+            username,
+            _passwordController.text,
+          );
+
           _showSuccessDialogWithIcon("Inicio de sesión exitoso");
 
           Future.delayed(const Duration(seconds: 2), () {
             if (!mounted) return;
             Navigator.pushReplacement(
               context,
-              MaterialPageRoute(builder: (context) => ShipFormPage()),
+              MaterialPageRoute(builder: (context) => const MainNavigationScreen()),
             );
           });
         } else {
@@ -157,8 +166,46 @@ class _LoginScreenState extends State<LoginScreen> {
       } else {
         _toast("Error: ${responseData['message']}");
       }
+    } on SocketException {
+      await _loginOffline();
     } catch (e) {
-      _toast("Error en la conexión al servidor");
+      _toast("Error en la conexión al servidor: $e");
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _loginOffline() async {
+    if (!mounted) return;
+    _toast("No hay conexión. Intentando login offline...");
+    setState(() => _isLoading = true);
+
+    try {
+      final dbHelper = DatabaseHelper.instance;
+      final userData = await dbHelper.verifyOfflineLogin(
+        _usernameController.text.trim(),
+        _passwordController.text,
+      );
+
+      if (userData != null) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setInt("idusuario", userData['idusuario']);
+        await prefs.setString("username", userData['username']);
+
+        _showSuccessDialogWithIcon("Inicio de sesión offline exitoso");
+
+        Future.delayed(const Duration(seconds: 2), () {
+          if (!mounted) return;
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const MainNavigationScreen()),
+          );
+        });
+      } else {
+        _toast("Error: Credenciales offline incorrectas o no guardadas.");
+      }
+    } catch (e) {
+      _toast("Error durante el login offline: $e");
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -196,7 +243,6 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // Fondo con gradiente y detalles
       body: Stack(
         children: [
           Container(
@@ -208,7 +254,6 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ),
           ),
-          // Decorativos sutiles
           Positioned(top: -40, right: -30, child: _bubble(140, 0.15)),
           Positioned(top: 80, left: -20, child: _bubble(90, 0.12)),
           SingleChildScrollView(
@@ -216,13 +261,12 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Header con icono de embarque
                 Center(
                   child: Container(
                     padding: const EdgeInsets.all(18),
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: Colors.white.withOpacity(0.18),
+                      color: Colors.white.withAlpha(46), // withOpacity(0.18)
                       border: Border.all(color: Colors.white24, width: 1),
                       boxShadow: const [
                         BoxShadow(
@@ -235,10 +279,11 @@ class _LoginScreenState extends State<LoginScreen> {
                     child: const CircleAvatar(
                       radius: 44,
                       backgroundColor: Colors.white,
-                      child: Icon(
-                        Icons.local_shipping_rounded,
-                        color: kBrandDark,
-                        size: 46,
+                      child: Padding(
+                        padding: EdgeInsets.all(8.0), // Ajusta el padding según sea necesario
+                        child: Image(
+                          image: AssetImage('assets/img/logo_triton_principal.png'),
+                        ),
                       ),
                     ),
                   ),
@@ -264,10 +309,9 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 28),
 
-                // Tarjeta “glass” con el formulario
                 Container(
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.9),
+                    color: Colors.white.withAlpha(230), // withOpacity(0.9)
                     borderRadius: BorderRadius.circular(18),
                     boxShadow: const [
                       BoxShadow(
@@ -379,7 +423,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
 
                 const SizedBox(height: 10),
-                // Sello con camioncito en watermark
                 Center(
                   child: Opacity(
                     opacity: 0.35,
@@ -411,16 +454,16 @@ Widget _bubble(double size, double opacity) {
     height: size,
     decoration: BoxDecoration(
       shape: BoxShape.circle,
-      color: Colors.white.withOpacity(opacity),
+      color: Colors.white.withAlpha((255 * opacity).round()),
     ),
   );
 }
 
 class RegisterScreen extends StatefulWidget {
-  const RegisterScreen({Key? key}) : super(key: key);
+  const RegisterScreen({super.key});
 
   @override
-  _RegisterScreenState createState() => _RegisterScreenState();
+  State<RegisterScreen> createState() => _RegisterScreenState();
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
@@ -516,7 +559,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Future<void> _registerUser() async {
     if (!_formKey.currentState!.validate()) return;
 
-    const String url = ApiConfig.baseUrl + "registerUser.php";
+    final String url = '${ApiConfig.baseUrl}registerUser.php';
 
     setState(() => _isLoading = true);
     try {
@@ -524,7 +567,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
         Uri.parse(url),
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({
-          // 👉 Ajusta la clave si tu API espera otro nombre (p. ej. "nombre_completo")
           "nombre": _nombreController.text.trim(),
           "username": _usuarioController.text.trim(),
           "telefono": _phoneController.text.trim(),
@@ -560,10 +602,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // === MISMO DISEÑO QUE EL LOGIN ===
       body: Stack(
         children: [
-          // Gradiente
           Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
@@ -573,7 +613,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
             ),
           ),
-          // Burbujas decorativas
           Positioned(top: -40, right: -30, child: _bubble(140, 0.15)),
           Positioned(top: 80, left: -20, child: _bubble(90, 0.12)),
 
@@ -582,13 +621,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Header con icono de embarque en círculo translúcido
                 Center(
                   child: Container(
                     padding: const EdgeInsets.all(18),
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: Colors.white.withOpacity(0.18),
+                      color: Colors.white.withAlpha(46), // withOpacity(0.18)
                       border: Border.all(color: Colors.white24, width: 1),
                       boxShadow: const [
                         BoxShadow(
@@ -601,10 +639,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     child: const CircleAvatar(
                       radius: 44,
                       backgroundColor: Colors.white,
-                      child: Icon(
-                        Icons.local_shipping_rounded,
-                        color: kBrandDark,
-                        size: 46,
+                      child: Padding(
+                        padding: EdgeInsets.all(8.0), // Ajusta el padding según sea necesario
+                        child: Image(
+                          image: AssetImage('assets/img/logo_triton_principal.png'),
+                        ),
                       ),
                     ),
                   ),
@@ -631,7 +670,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 const SizedBox(height: 28),
                 Container(
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.9),
+                    color: Colors.white.withAlpha(230), // withOpacity(0.9)
                     borderRadius: BorderRadius.circular(18),
                     boxShadow: const [
                       BoxShadow(

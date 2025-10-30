@@ -1,39 +1,32 @@
 <?php
-header("Access-Control-Allow-Origin: *");
-header("Content-Type: application/json; charset=UTF-8");
+header('Content-Type: application/json');
+require_once __DIR__ . '/conexion.php';
 
-// El usuario debe reemplazar esto con los detalles de conexión de su base de datos de Hostinger
-$servername = "localhost";
-$username = "u282972421_angel"; // Usuario de la base de datos
-$password = "ContraseñA123"; // Contraseña de la base de datos
-$dbname = "u282972421_maga"; // Nombre de la base de datos
+if ($_SERVER['REQUEST_METHOD'] == 'GET') {
+    try {
+        $sql = "SELECT idestatus, estatus, clave FROM estatus ORDER BY idestatus ASC";
+        $result = $conn->query($sql);
 
-// Crear conexión
-$conn = new mysqli($servername, $username, $password, $dbname);
+        if ($result === false) {
+            throw new Exception("Error al ejecutar la consulta: " . $conn->error);
+        }
 
-// Verificar conexión
-if ($conn->connect_error) {
-  die("Connection failed: " . $conn->connect_error);
-}
+        $estatus_list = [];
+        while ($row = $result->fetch_assoc()) {
+            $estatus_list[] = $row;
+        }
 
-// Establecer el conjunto de caracteres a utf8
-$conn->set_charset("utf8");
+        http_response_code(200);
+        echo json_encode(["success" => true, "data" => $estatus_list]);
 
-// Consulta para obtener los estatus de movimiento
-$sql = "SELECT idestatus, nombre_estatus FROM estatus_movimiento";
-$result = $conn->query($sql);
+    } catch (Exception $e) {
+        http_response_code(500);
+        echo json_encode(["success" => false, "error" => $e->getMessage()]);
+    }
 
-$estatus = array();
-
-if ($result && $result->num_rows > 0) {
-  // Salida de datos de cada fila
-  while($row = $result->fetch_assoc()) {
-    $estatus[] = $row;
-  }
-  echo json_encode($estatus);
+    $conn->close();
 } else {
-  // Enviar un array vacío si no hay resultados o si hay un error en la consulta
-  echo json_encode([]);
+    http_response_code(405);
+    echo json_encode(["success" => false, "error" => "Método no permitido."]);
 }
-$conn->close();
 ?>

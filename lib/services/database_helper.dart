@@ -3,25 +3,27 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
+import 'dart:convert'; // For utf8
+import 'package:crypto/crypto.dart'; // For sha256
+
+
 
 class DatabaseHelper {
   static final _databaseName = "embarques.db";
-  static final _databaseVersion = 2; // Versión incrementada
+  static final _databaseVersion = 6; // Versión incrementada para info de empresa y vendedor
 
   // --- Singleton ---
   DatabaseHelper._privateConstructor();
   static final DatabaseHelper instance = DatabaseHelper._privateConstructor();
   static Database? _database;
 
-  // Devuelve una base de datos nulable. En la web, será null.
   Future<Database?> get database async {
     if (_database != null) return _database!;
     _database = await _initDatabase();
     return _database;
   }
 
-  _initDatabase() async {
-    // Si estamos en la web, no hacemos nada y devolvemos null.
+  Future<Database?> _initDatabase() async {
     if (kIsWeb) {
       print("Plataforma web detectada, omitiendo inicialización de SQLite.");
       return null;
@@ -31,7 +33,7 @@ class DatabaseHelper {
     return await openDatabase(path,
         version: _databaseVersion,
         onCreate: _onCreate,
-        onUpgrade: _onUpgrade); // Callback de actualización añadido
+        onUpgrade: _onUpgrade);
   }
 
   Future _onCreate(Database db, int version) async {
@@ -77,12 +79,77 @@ class DatabaseHelper {
         PRIMARY KEY (idcliente, idproducto, idunidad)
       )
     ''');
+
+    // --- User Credentials Table (for offline login) ---
+    await db.execute('''
+      CREATE TABLE user_credentials (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        id_usuario INTEGER NOT NULL,
+        nombre_usuario TEXT NOT NULL
+      )
+    ''');
+
+    // --- Notas Offline Tables ---
+    await db.execute('''
+      CREATE TABLE notas_offline (
+        idnota INTEGER PRIMARY KEY,
+        total REAL NOT NULL,
+        saldo REAL NOT NULL,
+        regtimestamp TEXT NOT NULL,
+        nombre_cliente TEXT NOT NULL,
+        idalmacen INTEGER NOT NULL,
+        nombre_almacen_salida TEXT NOT NULL,
+        nombre_almacen_origen TEXT,
+        monto_pagado_acumulado REAL NOT NULL DEFAULT 0.0,
+        nombre_vendedor TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE nota_detalle_offline (
+        iddetalle INTEGER PRIMARY KEY,
+        idnota_fk INTEGER NOT NULL,
+        cantidad REAL NOT NULL,
+        precio REAL NOT NULL,
+        total REAL NOT NULL,
+        idestatus INTEGER NOT NULL,
+        nombreproducto TEXT NOT NULL,
+        nombreunidad TEXT NOT NULL,
+        FOREIGN KEY (idnota_fk) REFERENCES notas_offline (idnota) ON DELETE CASCADE
+      )
+    ''');
+    
+    await _createPagosOfflineTable(db);
+    await _createEmpresaInfoTable(db);
   }
 
-  // Se llama si la base de datos ya existe con una versión anterior.
+  Future<void> _createPagosOfflineTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE pagos_offline (
+        idpago INTEGER PRIMARY KEY,
+        idnota INTEGER NOT NULL,
+        monto REAL NOT NULL,
+        tipo_pago TEXT NOT NULL,
+        fecha TEXT NOT NULL,
+        FOREIGN KEY (idnota) REFERENCES notas_offline (idnota) ON DELETE CASCADE
+      )
+    ''');
+  }
+
+  Future<void> _createEmpresaInfoTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE empresa_info (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nombre TEXT NOT NULL,
+        direccion TEXT NOT NULL,
+        telefono TEXT NOT NULL
+      )
+    ''');
+  }
+
   Future _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
-      // Si actualizamos desde la v1, la tabla de precios no existe, así que la creamos.
       await db.execute('''
         CREATE TABLE precios_cat (
           idcliente INTEGER NOT NULL,
@@ -93,12 +160,123 @@ class DatabaseHelper {
         )
       ''');
     }
+    if (oldVersion < 3) {
+      await db.execute('''
+        CREATE TABLE user_credentials (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          username TEXT NOT NULL UNIQUE,
+          password_hash TEXT NOT NULL,
+          id_usuario INTEGER NOT NULL,
+          nombre_usuario TEXT NOT NULL
+        )
+      ''');
+    }
+    if (oldVersion < 4) {
+      await db.execute('''
+        CREATE TABLE notas_offline (
+          idnota INTEGER PRIMARY KEY,
+          total REAL NOT NULL,
+          saldo REAL NOT NULL,
+          regtimestamp TEXT NOT NULL,
+          nombre_cliente TEXT NOT NULL,
+          idalmacen INTEGER NOT NULL,
+          nombre_almacen_salida TEXT NOT NULL,
+          nombre_almacen_origen TEXT,
+          monto_pagado_acumulado REAL NOT NULL DEFAULT 0.0
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE nota_detalle_offline (
+          iddetalle INTEGER PRIMARY KEY AUTOINCREMENT,
+          idnota_fk INTEGER NOT NULL,
+          cantidad REAL NOT NULL,
+          precio REAL NOT NULL,
+          total REAL NOT NULL,
+          idestatus INTEGER NOT NULL,
+          nombreproducto TEXT NOT NULL,
+          nombreunidad TEXT NOT NULL,
+          FOREIGN KEY (idnota_fk) REFERENCES notas_offline (idnota) ON DELETE CASCADE
+        )
+      ''');
+    }
+    if (oldVersion < 5) {
+      await _createPagosOfflineTable(db);
+    }
+    if (oldVersion < 6) {
+      await _createEmpresaInfoTable(db);
+      await db.execute('ALTER TABLE notas_offline ADD COLUMN nombre_vendedor TEXT');
+    }
+
+  }
+
+  // --- Empresa Info Methods ---
+  Future<void> saveEmpresaInfo(Map<String, dynamic> empresaData) async {
+    final db = await database;
+    if (db == null) return;
+    await db.transaction((txn) async {
+      await txn.delete('empresa_info'); // Solo hay una fila
+      await txn.insert('empresa_info', empresaData);
+    });
+  }
+
+  Future<Map<String, dynamic>?> getEmpresaInfo() async {
+    final db = await database;
+    if (db == null) return null;
+    final List<Map<String, dynamic>> maps = await db.query('empresa_info', limit: 1);
+    if (maps.isNotEmpty) {
+      return maps.first;
+    }
+    return null;
+  }
+
+  // --- User Credential Methods for Offline Login ---
+
+  Future<void> saveUserCredentials(int idUsuario, String username, String nombreUsuario, String password) async {
+    final db = await database;
+    if (db == null) return;
+
+    var bytes = utf8.encode(password);
+    var digest = sha256.convert(bytes);
+    String hashedPassword = digest.toString();
+
+    await db.transaction((txn) async {
+      await txn.delete('user_credentials');
+      await txn.insert('user_credentials', {
+        'id_usuario': idUsuario,
+        'username': username.toLowerCase(),
+        'nombre_usuario': nombreUsuario,
+        'password_hash': hashedPassword,
+      });
+    });
+  }
+
+  Future<Map<String, dynamic>?> verifyOfflineLogin(String username, String password) async {
+    final db = await database;
+    if (db == null) return null;
+
+    var bytes = utf8.encode(password);
+    var digest = sha256.convert(bytes);
+    String hashedPassword = digest.toString();
+
+    final List<Map<String, dynamic>> maps = await db.query(
+      'user_credentials',
+      where: 'username = ? AND password_hash = ?',
+      whereArgs: [username.toLowerCase(), hashedPassword],
+    );
+
+    if (maps.isNotEmpty) {
+      return {
+        'idusuario': maps.first['id_usuario'],
+        'username': maps.first['nombre_usuario'],
+      };
+    }
+    return null;
   }
 
   // --- Embarque Methods ---
   Future<int> insertEmbarque(Map<String, dynamic> payload) async {
     Database? db = await instance.database;
-    if (db == null) return -1; // Guard para la web
+    if (db == null) return -1;
 
     int embarqueId = -1;
     await db.transaction((txn) async {
@@ -134,7 +312,7 @@ class DatabaseHelper {
 
   Future<void> batchUpdateCatalog(String tableName, List<Map<String, dynamic>> items) async {
     final db = await database;
-    if (db == null) return; // Guard para la web
+    if (db == null) return;
 
     await db.transaction((txn) async {
       await txn.delete(tableName); // Clear old data
@@ -146,7 +324,7 @@ class DatabaseHelper {
 
   Future<List<Map<String, dynamic>>> getCatalog(String tableName) async {
     final db = await database;
-    if (db == null) return []; // Guard para la web
+    if (db == null) return [];
 
     return await db.query(tableName);
   }
@@ -155,7 +333,7 @@ class DatabaseHelper {
 
   Future<void> insertOrUpdatePrecio(Map<String, dynamic> precioData) async {
     final db = await database;
-    if (db == null) return; // Guard para la web
+    if (db == null) return;
 
     await db.insert(
       'precios_cat',
@@ -166,7 +344,7 @@ class DatabaseHelper {
 
   Future<double?> getPrecio(int idCliente, int idProducto, int idUnidad) async {
     final db = await database;
-    if (db == null) return null; // Guard para la web
+    if (db == null) return null;
 
     final List<Map<String, dynamic>> maps = await db.query(
       'precios_cat',
@@ -183,9 +361,8 @@ class DatabaseHelper {
 
   Future<List<Map<String, dynamic>>> getUnsyncedEmbarques() async {
     final db = await database;
-    if (db == null) return []; // Guard para la web
+    if (db == null) return [];
 
-    // Usamos un rawQuery para poder hacer el JOIN fácilmente
     final List<Map<String, dynamic>> result = await db.rawQuery('''
       SELECT
         eo.idfolioembarque_local,
@@ -203,9 +380,8 @@ class DatabaseHelper {
 
   Future<Map<String, dynamic>> getFullEmbarque(int localId) async {
     final db = await database;
-    if (db == null) return {}; // Guard para la web
+    if (db == null) return {};
 
-    // 1. Obtener la cabecera
     final List<Map<String, dynamic>> headers = await db.query(
       'embarque_offline',
       where: 'idfolioembarque_local = ?',
@@ -216,14 +392,12 @@ class DatabaseHelper {
     }
     final header = headers.first;
 
-    // 2. Obtener los detalles
     final List<Map<String, dynamic>> details = await db.query(
       'embarque_detalle_offline',
       where: 'idfolioembarque_local_fk = ?',
       whereArgs: [localId],
     );
 
-    // 3. Construir el payload que la API espera
     final Map<String, dynamic> payload = {
       'idalmacen': header['idalmacen'],
       'idusuario': header['idusuario'],
@@ -242,7 +416,7 @@ class DatabaseHelper {
 
   Future<void> deleteLocalEmbarque(int localId) async {
     final db = await database;
-    if (db == null) return; // Guard para la web
+    if (db == null) return;
 
     await db.delete(
       'embarque_offline',
@@ -250,5 +424,88 @@ class DatabaseHelper {
       whereArgs: [localId],
     );
   }
+
+  // --- Notas Offline Methods ---
+
+  Future<int> insertNotaOffline(Map<String, dynamic> notaMap) async {
+    final db = await database;
+    if (db == null) return -1;
+    return await db.insert('notas_offline', notaMap, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<void> insertNotaDetallesOffline(List<Map<String, dynamic>> detalles) async {
+    final db = await database;
+    if (db == null) return;
+    await db.transaction((txn) async {
+      for (var detalle in detalles) {
+        await txn.insert('nota_detalle_offline', detalle, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> getNotasOffline() async {
+    final db = await database;
+    if (db == null) return [];
+    return await db.query('notas_offline', orderBy: 'regtimestamp DESC');
+  }
+
+  Future<List<Map<String, dynamic>>> getNotaDetallesOffline(int idnota) async {
+    final db = await database;
+    if (db == null) return [];
+    return await db.query(
+      'nota_detalle_offline',
+      where: 'idnota_fk = ?',
+      whereArgs: [idnota],
+    );
+  }
+
+  Future<void> clearAllNotasOffline() async {
+    final db = await database;
+    if (db == null) return;
+    await db.delete('notas_offline');
+    await db.delete('nota_detalle_offline');
+  }
+
+  // --- Pagos Offline Methods (Nuevos en v5) ---
+
+  Future<void> insertPagosOffline(List<Map<String, dynamic>> pagos) async {
+    final db = await database;
+    if (db == null || pagos.isEmpty) return;
+
+    await db.transaction((txn) async {
+      // Opcional: borrar pagos viejos para esta nota antes de insertar los nuevos
+      final idnota = pagos.first['idnota'];
+      await txn.delete('pagos_offline', where: 'idnota = ?', whereArgs: [idnota]);
+
+      for (var pago in pagos) {
+        await txn.insert('pagos_offline', pago, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+    });
+  }
+
+  Future<Map<String, dynamic>?> getLatestPagoForNota(int idnota) async {
+    final db = await database;
+    if (db == null) return null;
+
+    final List<Map<String, dynamic>> maps = await db.query(
+      'pagos_offline',
+      where: 'idnota = ?',
+      whereArgs: [idnota],
+      orderBy: 'fecha DESC',
+      limit: 1,
+    );
+
+    if (maps.isNotEmpty) {
+      return maps.first;
+    }
+    return null;
+  }
+
+  Future<void> clearAllPagosOffline() async {
+    final db = await database;
+    if (db == null) return;
+    await db.delete('pagos_offline');
+  }
+
 }
 

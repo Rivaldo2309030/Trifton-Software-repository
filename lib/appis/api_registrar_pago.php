@@ -23,7 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $conn->begin_transaction();
 
     try {
-        $stmt = $conn->prepare("SELECT saldo FROM notas WHERE idnota = ? FOR UPDATE");
+        $stmt = $conn->prepare("SELECT saldo, pagos FROM notas WHERE idnota = ? FOR UPDATE");
         $stmt->bind_param("i", $idnota);
         $stmt->execute();
         $result = $stmt->get_result();
@@ -34,19 +34,21 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
         $nota = $result->fetch_assoc();
         $saldo_actual = floatval($nota['saldo']);
+        $pagos_acumulados_actual = floatval($nota['pagos']);
 
         if ($monto > $saldo_actual) {
             throw new Exception("El monto del pago no puede ser mayor al saldo pendiente.");
         }
 
         $nuevo_saldo = $saldo_actual - $monto;
+        $nuevos_pagos_acumulados = $pagos_acumulados_actual + $monto;
 
         $stmt_pago = $conn->prepare("INSERT INTO pagos_m (idnota, totalpago, tipopago, saldonota) VALUES (?, ?, ?, ?)");
         $stmt_pago->bind_param("idsd", $idnota, $monto, $tipopago, $nuevo_saldo);
         $stmt_pago->execute();
 
-        $stmt_nota = $conn->prepare("UPDATE notas SET saldo = ?, pagos = pagos + 1 WHERE idnota = ?");
-        $stmt_nota->bind_param("di", $nuevo_saldo, $idnota);
+        $stmt_nota = $conn->prepare("UPDATE notas SET saldo = ?, pagos = ? WHERE idnota = ?");
+        $stmt_nota->bind_param("ddi", $nuevo_saldo, $nuevos_pagos_acumulados, $idnota);
         $stmt_nota->execute();
 
         $conn->commit();

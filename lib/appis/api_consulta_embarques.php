@@ -16,6 +16,7 @@ try {
     $conn = new mysqli($servername, $username, $password, $dbname);
 
     $fecha = isset($_GET['fecha']) ? $_GET['fecha'] : date('Y-m-d');
+    $idAlmacen = isset($_GET['idalmacen']) ? $_GET['idalmacen'] : null;
 
     $sql = "
         SELECT 
@@ -38,12 +39,19 @@ try {
             almacenistas a ON e.idalmacenista = a.idalmacenista
         WHERE 
             DATE(e.regtimestamp) = ?
-        ORDER BY
-            e.regtimestamp DESC
     ";
 
+    $params = ["s", $fecha];
+    if ($idAlmacen !== null && $idAlmacen !== '') {
+        $sql .= " AND e.idalmacen = ?";
+        $params[0] .= "i";
+        $params[] = $idAlmacen;
+    }
+
+    $sql .= " ORDER BY e.regtimestamp DESC";
+
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param("s", $fecha);
+    $stmt->bind_param(...$params);
     $stmt->execute();
     $result = $stmt->get_result();
 

@@ -1,25 +1,12 @@
 <?php
-ini_set('display_errors', 1); // Cambiar a 0 en producción
+ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
 header('Content-Type: application/json; charset=UTF-8');
-header("Access-Control-Allow-Origin: *");
 
-mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
-
-$servername = "srv571.hstgr.io";
-$username = "u203835291_serviceOrder";
-$password = "TritonSrv2025$%";
-$dbname = "u203835291_orders";
-
-$conn = new mysqli($servername, $username, $password, $dbname);
-$conn->set_charset('utf8mb4');
-
-if ($conn->connect_error) {
-    http_response_code(500);
-    die(json_encode(["error" => "Connection failed: " . $conn->connect_error]));
-}
+// 1. Unificar la conexión a la BD
+require_once __DIR__ . '/conexion.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
@@ -44,7 +31,37 @@ try {
         throw new Exception('El campo detalles debe ser un array con al menos un producto.');
     }
 
-    // 1. Calcular el total y el saldo a partir de los detalles
+    // 2. Validar que el embarque no haya sido procesado
+    $id_embarque = $input['id_embarque'];
+    $sql_check = "SELECT estado FROM embarque WHERE idfolioembarque = ?";
+    $stmt_check = $conn->prepare($sql_check);
+    $stmt_check->bind_param("i", $id_embarque);
+    $stmt_check->execute();
+    $result_check = $stmt_check->get_result();
+    if ($result_check->num_rows === 0) {
+        throw new Exception("El embarque especificado no existe.");
+    }
+    $embarque_data = $result_check->fetch_assoc();
+    if ($embarque_data['estado'] != 1) {
+        throw new Exception("Este embarque ya ha sido procesado y no se puede volver a generar una nota.");
+    }
+    $stmt_check->close();
+
+    // 3. Obtener los días de pago del cliente
+    $id_cliente = $input['id_cliente'];
+    $sql_cliente = "SELECT diaspago FROM clientes WHERE idcliente = ?";
+    $stmt_cliente = $conn->prepare($sql_cliente);
+    $stmt_cliente->bind_param("i", $id_cliente);
+    $stmt_cliente->execute();
+    $result_cliente = $stmt_cliente->get_result();
+    if ($result_cliente->num_rows === 0) {
+        throw new Exception("Cliente no encontrado.");
+    }
+    $cliente_data = $result_cliente->fetch_assoc();
+    $dias_pago = (int)$cliente_data['diaspago'];
+    $stmt_cliente->close();
+
+    // 3. Calcular el total y el saldo a partir de los detalles
     $total = 0;
     foreach ($input['detalles'] as $detalle) {
         $cantidad = (float)$detalle['cantidad'];
@@ -53,26 +70,29 @@ try {
     }
     $saldo = $total;
 
-    // 2. Insertar en la tabla `notas`
-    $sql_nota = "INSERT INTO notas (idusuario, idcliente, idalmacen, idembarque, total, saldo, fechapago) VALUES (?, ?, ?, ?, ?, ?, NOW())";
+    // 4. Insertar en la tabla `notas` con la fecha de pago calculada
+    $sql_nota = "INSERT INTO notas (idusuario, idcliente, idalmacen, idembarque, total, saldo, credito_dias, fechapago, pagos) VALUES (?, ?, ?, ?, ?, ?, ?, DATE_ADD(CURDATE(), INTERVAL ? DAY), 0.00)";
     $stmt_nota = $conn->prepare($sql_nota);
-    // CORRECCIÓN: Se cambió "iiidd" a "iiiidd" para que coincida con los 6 parámetros
-    $stmt_nota->bind_param("iiiidd", 
+    
+    $stmt_nota->bind_param("iiiiddis", 
         $input['id_usuario'], 
-        $input['id_cliente'], 
+        $id_cliente, 
         $input['id_almacen'], 
         $input['id_embarque'], 
         $total, 
-        $saldo
+        $saldo,
+        $dias_pago, // Guardamos los días de crédito usados
+        $dias_pago  // Usamos los días para el cálculo de la fecha
     );
     $stmt_nota->execute();
     $idnota = $conn->insert_id;
+    $stmt_nota->close();
 
-    // 3. Preparar la inserción para `nota_detalle`
+    // 5. Preparar la inserción para `nota_detalle`
     $sql_detalle = "INSERT INTO nota_detalle (idnota, idproducto, idunidad, precio, total) VALUES (?, ?, ?, ?, ?)";
     $stmt_detalle = $conn->prepare($sql_detalle);
 
-    // 4. Iterar y guardar los detalles de la nota
+    // 6. Iterar y guardar los detalles de la nota
     foreach ($input['detalles'] as $detalle) {
         $cantidad = (float)$detalle['cantidad'];
         $precio = (float)$detalle['precio'];
@@ -87,14 +107,23 @@ try {
         );
         $stmt_detalle->execute();
     }
+    $stmt_detalle->close();
 
-    // 5. Actualizar el estado del embarque original
-    $sql_update_embarque = "UPDATE embarque SET estado = 2 WHERE idfolioembarque = ?"; // Asumimos que estado 2 = Procesado
+    // 7. Actualizar el estado del embarque original a 'Procesado'
+    $sql_update_embarque = "UPDATE embarque SET estado = 2 WHERE idfolioembarque = ?"; // Asumimos que estado 2 = Procesado/Facturado
     $stmt_update = $conn->prepare($sql_update_embarque);
     $stmt_update->bind_param("i", $input['id_embarque']);
     $stmt_update->execute();
+    $stmt_update->close();
 
-    // 6. Confirmar la transacción
+    // 8. Actualizar el estatus de todos los productos del embarque a 'Salida por Pedido' (SP = 2)
+    $sql_update_detalles = "UPDATE embarque_detalle SET idestatus = 2 WHERE idfolioembarque = ?";
+    $stmt_update_detalles = $conn->prepare($sql_update_detalles);
+    $stmt_update_detalles->bind_param("i", $input['id_embarque']);
+    $stmt_update_detalles->execute();
+    $stmt_update_detalles->close();
+
+    // 9. Confirmar la transacción
     $conn->commit();
 
     http_response_code(201);
@@ -103,8 +132,10 @@ try {
 } catch (Exception $e) {
     $conn->rollback();
     $errorMessage = 'Error en transacción: ' . $e->getMessage();
+    // Log the error to a file
+    file_put_contents('error_log_generar_nota.txt', date('Y-m-d H:i:s') . ' - ' . $errorMessage . "\n", FILE_APPEND);
     http_response_code(500);
-    die(json_encode(['error' => $errorMessage]));
+    die(json_encode(['success' => false, 'error' => $errorMessage]));
 }
 
 $conn->close();

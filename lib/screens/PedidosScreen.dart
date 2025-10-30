@@ -1,40 +1,27 @@
 import 'dart:convert';
+import 'dart:io'; // Import for SocketException
+import 'dart:async'; // Import for TimeoutException
 import 'package:flutter/material.dart';
 import 'package:distribuidora/services/api_config.dart';
 import 'package:http/http.dart' as http;
 import 'package:distribuidora/screens/nota_detail_screen.dart';
 import 'package:intl/intl.dart';
 import 'package:distribuidora/models/nota_model.dart';
+import 'package:connectivity_plus/connectivity_plus.dart'; // Import for connectivity_plus
+import 'package:distribuidora/models/offline_note_model.dart';
+import 'package:distribuidora/services/database_helper.dart';
 
-// --- Modelo para el Historial de Embarques ---
-class HistorialItem {
-  final int idDetalle;
-  final int cantidad;
-  final double precioUnitario;
-  final String nombreProducto;
-  final String nombreUnidad;
-  final String nombreCliente;
-  final String fechaEmbarque;
+// --- Modelo para la nueva vista de Clientes con Saldo ---
+class ClienteConSaldo {
+  final int id;
+  final String nombre;
 
-  HistorialItem({
-    required this.idDetalle,
-    required this.cantidad,
-    required this.precioUnitario,
-    required this.nombreProducto,
-    required this.nombreUnidad,
-    required this.nombreCliente,
-    required this.fechaEmbarque,
-  });
+  ClienteConSaldo({required this.id, required this.nombre});
 
-  factory HistorialItem.fromJson(Map<String, dynamic> json) {
-    return HistorialItem(
-      idDetalle: int.tryParse(json['id_detalle'].toString()) ?? 0,
-      cantidad: int.tryParse(json['cantidad'].toString()) ?? 0,
-      precioUnitario: double.tryParse(json['precio_unitario'].toString()) ?? 0.0,
-      nombreProducto: json['nombreproducto'] ?? 'N/A',
-      nombreUnidad: json['nombreunidad'] ?? 'N/A',
-      nombreCliente: json['nombrecliente'] ?? 'N/A',
-      fechaEmbarque: json['fecha_embarque'] ?? '',
+  factory ClienteConSaldo.fromJson(Map<String, dynamic> json) {
+    return ClienteConSaldo(
+      id: int.tryParse(json['idcliente'].toString()) ?? 0,
+      nombre: json['nombrecliente'] ?? 'N/A',
     );
   }
 }
@@ -43,27 +30,39 @@ class PedidosScreen extends StatefulWidget {
   const PedidosScreen({super.key});
 
   @override
-  State<PedidosScreen> createState() => _PedidosScreenState();
+  PedidosScreenState createState() => PedidosScreenState();
 }
 
-class _PedidosScreenState extends State<PedidosScreen> with SingleTickerProviderStateMixin {
+class PedidosScreenState extends State<PedidosScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
 
-  // Estado para la pestaña de Notas de Venta
+  // --- Estado para la pestaña de Notas de Venta (Refactorizado) ---
   bool _isLoadingNotas = true;
-  List<Nota> _notasDelDia = [];
-  DateTime _fechaFiltro = DateTime.now();
+  List<Nota> _notas = [];
+  List<ClienteConSaldo> _clientesConSaldo = [];
+  ClienteConSaldo? _selectedClient;
 
-  // Estado para la pestaña de Historial
+  // --- Estado para la pestaña de Historial (Refactorizado) ---
   bool _isLoadingHistorial = true;
-  List<HistorialItem> _historialItems = [];
+  List<Nota> _todasLasNotas = [];
+
+  void refreshAllData() {
+    _fetchDataNotas();
+    _fetchHistorial();
+  }
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _fetchNotasDelDia();
+    _fetchDataNotas(); 
     _fetchHistorial();
+
+    _tabController.addListener(() {
+      if (_tabController.index == 1) {
+        _fetchHistorial(); // Refresca el historial cada vez que se visita la pestaña
+      }
+    });
   }
 
   @override
@@ -72,60 +71,227 @@ class _PedidosScreenState extends State<PedidosScreen> with SingleTickerProvider
     super.dispose();
   }
 
-  // --- LÓGICA PARA NOTAS DE VENTA ---
-  Future<void> _fetchNotasDelDia() async {
-    setState(() { _isLoadingNotas = true; });
-    try {
-      final formattedDate = DateFormat('yyyy-MM-dd').format(_fechaFiltro);
-      final url = Uri.parse('${ApiConfig.baseUrl}api_consulta_notas_v2.php?fecha=$formattedDate');
-      final response = await http.get(url);
-      if (mounted) {
-        final decoded = json.decode(response.body);
-        if (decoded['success'] == true) {
-          final data = decoded['data'] as List;
-          setState(() {
-            _notasDelDia = data.map((json) => Nota.fromJson(json)).toList();
-          });
+    // --- LÓGICA REFACTORIZADA PARA NOTAS DE VENTA ---
+
+    Future<void> _fetchDataNotas() async {
+      setState(() { _isLoadingNotas = true; });
+
+      var connectivityResult = await (Connectivity().checkConnectivity());
+      final isOffline = connectivityResult == ConnectivityResult.none;
+
+      if (isOffline) {
+        // _showConnectivitySnackBar('No hay conexión a internet. Intentando cargar notas guardadas localmente.');
+        await _loadNotasFromOffline();
+        if (mounted) setState(() { _isLoadingNotas = false; });
+        return;
+      }
+
+      try {
+        String urlString;
+        if (_selectedClient == null) {
+          urlString = '${ApiConfig.baseUrl}api_consulta_notas_v2.php';
         } else {
-          throw Exception(decoded['error'] ?? 'Error al cargar notas');
+          urlString = '${ApiConfig.baseUrl}api_consulta_notas_v2.php?idcliente=${_selectedClient!.id}';
+        }
+
+        final url = Uri.parse(urlString);
+        final response = await http.get(url).timeout(const Duration(seconds: 15));
+
+        if (mounted) {
+          final decoded = json.decode(response.body);
+          if (decoded['success'] == true) {
+            final responseData = decoded['response'];
+            final type = responseData['type'];
+            final data = responseData['data'] as List;
+
+            setState(() {
+              if (type == 'clientes') {
+                _clientesConSaldo = data.map((json) => ClienteConSaldo.fromJson(json)).toList();
+                // No guardar clientes en offline por ahora, solo notas
+              } else if (type == 'notas') {
+                _notas = data.map((json) => Nota.fromJson(json)).toList();
+                // No guardar en offline aquí para evitar sobreescribir el historial completo
+              }
+            });
+          } else {
+            throw Exception(decoded['error'] ?? 'Error al cargar datos');
+          }
+        }
+      } on SocketException {
+        if (mounted) {
+          // _showConnectivitySnackBar('No se pudo conectar al servidor. Intentando cargar notas guardadas localmente.');
+          await _loadNotasFromOffline(); // Fallback a offline
+        }
+      } on TimeoutException {
+        if (mounted) {
+          // _showConnectivitySnackBar('La conexión es lenta o inestable. Intentando cargar notas guardadas localmente.');
+          await _loadNotasFromOffline(); // Fallback a offline
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error en Notas: $e')));
+          await _loadNotasFromOffline(); // Fallback a offline
+        }
+      } finally {
+        if (mounted) setState(() { _isLoadingNotas = false; });
+      }
+    }
+
+    Future<void> _loadNotasFromOffline() async {
+      final dbHelper = DatabaseHelper.instance;
+      final List<Map<String, dynamic>> notasMaps = await dbHelper.getNotasOffline();
+      final List<Nota> loadedNotas = [];
+
+      for (var notaMap in notasMaps) {
+        // Convert NotaOffline map back to Nota object for UI display
+        loadedNotas.add(Nota(
+          idnota: notaMap['idnota'],
+          total: notaMap['total'],
+          saldo: notaMap['saldo'],
+          regtimestamp: notaMap['regtimestamp'],
+          nombreCliente: notaMap['nombre_cliente'],
+          idalmacen: notaMap['idalmacen'],
+          nombreAlmacenSalida: notaMap['nombre_almacen_salida'],
+          nombreAlmacenOrigen: notaMap['nombre_almacen_origen'],
+          montoPagadoAcumulado: notaMap['monto_pagado_acumulado'],
+          nombreVendedor: notaMap['nombre_vendedor'], // <-- AÑADIDO
+        ));
+      }
+
+      if (mounted) {
+        setState(() {
+          _notas = loadedNotas;
+          _todasLasNotas = loadedNotas; // Also update for historial tab
+        });
+        if (loadedNotas.isEmpty) {
+          // _showConnectivitySnackBar('No hay conexión a internet y no se encontraron notas guardadas localmente.');
+        } else {
+          // _showConnectivitySnackBar('Mostrando notas guardadas localmente (sin conexión).');
         }
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error en Notas: $e')));
-      }
-    } finally {
-      if (mounted) setState(() { _isLoadingNotas = false; });
     }
-  }
 
-  // --- LÓGICA PARA HISTORIAL DE EMBARQUES ---
-  Future<void> _fetchHistorial() async {
-    setState(() { _isLoadingHistorial = true; });
-    try {
-      final url = Uri.parse('${ApiConfig.baseUrl}api_historial_embarques.php');
-      final response = await http.get(url);
-      if (mounted) {
-        final decoded = json.decode(response.body);
-        if (decoded['success'] == true) {
-          final data = decoded['data'] as List;
-          setState(() {
-            _historialItems = data.map((json) => HistorialItem.fromJson(json)).toList();
-          });
-        } else {
-          throw Exception(decoded['error'] ?? 'Error al cargar historial');
+    Future<void> _saveNotasToOffline(List<Nota> notas) async {
+      final dbHelper = DatabaseHelper.instance;
+      await dbHelper.clearAllNotasOffline(); // Clear old cache
+
+      for (final nota in notas) {
+        await dbHelper.insertNotaOffline(NotaOffline.fromNota(nota).toMap());
+        // Fetch and save details for each note
+      }
+    }
+
+
+
+  
+
+    // --- LÓGICA REFACTORIZADA PARA HISTORIAL ---
+
+        Future<void> _fetchHistorial() async {
+
+          setState(() { _isLoadingHistorial = true; });
+
+    
+
+          var connectivityResult = await (Connectivity().checkConnectivity());
+
+          final isOffline = connectivityResult == ConnectivityResult.none;
+
+    
+
+          if (isOffline) {
+
+            // _showConnectivitySnackBar('No hay conexión a internet. Intentando cargar historial guardado localmente.');
+
+            await _loadNotasFromOffline(); // Reutilizamos la misma lógica de carga
+
+            if (mounted) setState(() { _isLoadingHistorial = false; });
+
+            return;
+
+          }
+
+    
+
+          try {
+
+            final url = Uri.parse('${ApiConfig.baseUrl}api_todas_las_notas.php');
+
+            final response = await http.get(url).timeout(const Duration(seconds: 15)); // Added timeout
+
+    
+
+            if (mounted) {
+
+              final decoded = json.decode(response.body);
+
+              if (decoded['success'] == true) {
+
+                final data = decoded['data'] as List;
+
+                setState(() {
+
+                  _todasLasNotas = data.map((json) => Nota.fromJson(json)).toList();
+
+                  // Guardar historial en SQLite local
+
+                  _saveNotasToOffline(_todasLasNotas);
+
+                });
+
+              } else {
+
+                throw Exception(decoded['error'] ?? 'Error al cargar historial');
+
+              }
+
+            }
+
+          } on SocketException {
+
+            if (mounted) {
+
+              // _showConnectivitySnackBar('No se pudo conectar al servidor. Intentando cargar historial guardado localmente.');
+
+              await _loadNotasFromOffline(); // Fallback a offline
+
+            }
+
+          } on TimeoutException { // Catch TimeoutException specifically
+
+            if (mounted) {
+
+              // _showConnectivitySnackBar('La conexión es lenta o inestable. Intentando cargar historial guardado localmente.');
+
+              await _loadNotasFromOffline(); // Fallback a offline
+
+            }
+
+          } catch (e) {
+
+            if (mounted) {
+
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error en Historial: $e')));
+
+              await _loadNotasFromOffline(); // Fallback a offline
+
+            }
+
+          } finally {
+
+            if (mounted) setState(() { _isLoadingHistorial = false; });
+
+          }
+
         }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error en Historial: $e')));
-      }
-    } finally {
-      if (mounted) setState(() { _isLoadingHistorial = false; });
-    }
-  }
 
-  String _formatTimestamp(String? isoString) {
+  
+
+
+
+  
+
+    String _formatTimestamp(String? isoString) {
     if (isoString == null) return 'Fecha desconocida';
     try {
       return DateFormat('dd/MM/yyyy HH:mm').format(DateTime.parse(isoString));
@@ -165,75 +331,75 @@ class _PedidosScreenState extends State<PedidosScreen> with SingleTickerProvider
     );
   }
 
-  // --- UI para Pestaña 1: Notas de Venta ---
+  // --- UI REFACTORIZADA para Pestaña 1: Notas de Venta ---
   Widget _buildNotasDeVentaView() {
     return Scaffold(
       backgroundColor: const Color(0xFFE9EDF3),
       body: Column(
         children: [
-          _buildFiltersNotas(),
+          if (_selectedClient != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+              child: Card(
+                elevation: 2,
+                child: ListTile(
+                  leading: IconButton(
+                    icon: const Icon(Icons.arrow_back_ios, color: Color(0xFF1E3A8A)),
+                    onPressed: () {
+                      setState(() {
+                        _selectedClient = null;
+                        _clientesConSaldo = []; // Limpiar para forzar recarga
+                      });
+                      _fetchDataNotas(); // Cargar la lista de clientes de nuevo
+                    },
+                  ),
+                  title: Text(
+                    'Notas de: ${_selectedClient!.nombre}',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+            ),
           Expanded(
             child: _isLoadingNotas
                 ? const Center(child: CircularProgressIndicator())
-                : _notasDelDia.isEmpty
-                    ? const Center(child: Text('No se encontraron notas de venta para esta fecha.'))
-                    : _buildNotaslist(),
+                : _selectedClient == null
+                    ? _buildClientList()
+                    : _notas.isEmpty
+                        ? const Center(child: Text('Este cliente no tiene notas pendientes.'))
+                        : _buildNotaslist(),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildFiltersNotas() {
-    return Padding(
-      padding: const EdgeInsets.all(8.0),
-      child: Card(
-        elevation: 2,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Text('Mostrando notas para:'),
-              const SizedBox(width: 16),
-              Text(DateFormat('dd/MM/yyyy').format(_fechaFiltro), style: const TextStyle(fontWeight: FontWeight.bold)),
-              IconButton(
-                icon: const Icon(Icons.calendar_today, color: Color(0xFF1E3A8A)),
-                onPressed: () async {
-                  final picked = await showDatePicker(context: context, initialDate: _fechaFiltro, firstDate: DateTime(2020), lastDate: DateTime(2030));
-                  if (picked != null && picked != _fechaFiltro) {
-                    setState(() => _fechaFiltro = picked);
-                    _fetchNotasDelDia();
-                  }
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildNotaslist() {
+  Widget _buildClientList() {
+    if (_clientesConSaldo.isEmpty) {
+      return const Center(child: Text('No hay clientes con notas pendientes de pago.'));
+    }
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-      itemCount: _notasDelDia.length,
+      padding: const EdgeInsets.all(8),
+      itemCount: _clientesConSaldo.length,
       itemBuilder: (context, index) {
-        final nota = _notasDelDia[index];
-        final currencyFormat = NumberFormat.currency(locale: 'es_MX', symbol: '\$');
-        final bool conSaldo = nota.saldo > 0;
+        final cliente = _clientesConSaldo[index];
         return Card(
-          margin: const EdgeInsets.only(bottom: 12),
+          margin: const EdgeInsets.symmetric(vertical: 4),
           child: ListTile(
-            leading: CircleAvatar(backgroundColor: conSaldo ? Colors.orange.shade700 : Colors.green, foregroundColor: Colors.white, child: Text('#${nota.idnota}')),
-            title: Text(nota.nombreCliente, style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: Text('''Total: ${currencyFormat.format(nota.total)} | Saldo: ${currencyFormat.format(nota.saldo)}
-${_formatTimestamp(nota.regtimestamp)}'''),
-            isThreeLine: true,
-            trailing: const Icon(Icons.arrow_forward_ios),
-            onTap: () async {
-              final shouldRefresh = await Navigator.push(context, MaterialPageRoute(builder: (context) => NotaDetailScreen(nota: nota)));
-              if (shouldRefresh == true) _fetchNotasDelDia();
+            leading: const CircleAvatar(
+              backgroundColor: Color(0xFF1E3A8A),
+              foregroundColor: Colors.white,
+              child: Icon(Icons.person_outline),
+            ),
+            title: Text(cliente.nombre, style: const TextStyle(fontWeight: FontWeight.w600)),
+            trailing: const Icon(Icons.arrow_forward_ios, color: Colors.blueGrey),
+            onTap: () {
+              setState(() {
+                _selectedClient = cliente;
+                _notas = []; // Limpiar notas anteriores
+              });
+              _fetchDataNotas();
             },
           ),
         );
@@ -241,14 +407,43 @@ ${_formatTimestamp(nota.regtimestamp)}'''),
     );
   }
 
-  // --- UI para Pestaña 2: Historial de Embarques ---
+  Widget _buildNotaslist() {
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      itemCount: _notas.length,
+      itemBuilder: (context, index) {
+        final nota = _notas[index];
+        final currencyFormat = NumberFormat.currency(locale: 'es_MX', symbol: '\$');
+        final bool conSaldo = nota.saldo > 0;
+        return Card(
+          margin: const EdgeInsets.only(bottom: 12),
+          child: ListTile(
+            leading: CircleAvatar(backgroundColor: conSaldo ? Colors.orange.shade700 : Colors.green, foregroundColor: Colors.white, child: Text('#${nota.idnota}')),
+            title: Text(nota.nombreCliente, style: const TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: Text('''Total: ${currencyFormat.format(nota.total)} | Saldo: ${currencyFormat.format(nota.saldo)} | Pagado: ${currencyFormat.format(nota.montoPagadoAcumulado)}
+${_formatTimestamp(nota.regtimestamp)}'''),
+            isThreeLine: true,
+            trailing: const Icon(Icons.arrow_forward_ios),
+            onTap: () async {
+              final shouldRefresh = await Navigator.push(context, MaterialPageRoute(builder: (context) => NotaDetailScreen(nota: nota)));
+              if (shouldRefresh == true) {
+                _fetchDataNotas(); // Refresca las notas del cliente actual
+              }
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  // --- UI REFACTORIZADA para Pestaña 2: Historial ---
   Widget _buildHistorialView() {
     return Scaffold(
       backgroundColor: const Color(0xFFE9EDF3),
       body: _isLoadingHistorial
           ? const Center(child: CircularProgressIndicator())
-          : _historialItems.isEmpty
-              ? const Center(child: Text('No se encontraron items en el historial de embarques.'))
+          : _todasLasNotas.isEmpty
+              ? const Center(child: Text('No se encontraron notas en el historial.'))
               : _buildHistorialList(),
     );
   }
@@ -256,17 +451,26 @@ ${_formatTimestamp(nota.regtimestamp)}'''),
   Widget _buildHistorialList() {
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-      itemCount: _historialItems.length,
+      itemCount: _todasLasNotas.length,
       itemBuilder: (context, index) {
-        final item = _historialItems[index];
+        final nota = _todasLasNotas[index];
+        final currencyFormat = NumberFormat.currency(locale: 'es_MX', symbol: '\$');
+        final bool conSaldo = nota.saldo > 0;
         return Card(
           margin: const EdgeInsets.only(bottom: 12),
           child: ListTile(
-            leading: CircleAvatar(backgroundColor: const Color(0xFF1E3A8A), foregroundColor: Colors.white, child: Text(item.cantidad.toString())),
-            title: Text(item.nombreProducto, style: const TextStyle(fontWeight: FontWeight.bold)),
-                        subtitle: Text('''Cliente: ${item.nombreCliente}
-            Unidad: ${item.nombreUnidad} | Fecha: ${_formatTimestamp(item.fechaEmbarque)}'''),
+            leading: CircleAvatar(backgroundColor: conSaldo ? Colors.orange.shade700 : Colors.green, foregroundColor: Colors.white, child: Text('#${nota.idnota}')),
+            title: Text(nota.nombreCliente, style: const TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: Text('''Total: ${currencyFormat.format(nota.total)} | Saldo: ${currencyFormat.format(nota.saldo)} | Pagado: ${currencyFormat.format(nota.montoPagadoAcumulado)}
+${_formatTimestamp(nota.regtimestamp)}'''),
             isThreeLine: true,
+            trailing: const Icon(Icons.arrow_forward_ios),
+            onTap: () async {
+              await Navigator.push(context, MaterialPageRoute(builder: (context) => NotaDetailScreen(nota: nota)));
+              // Al volver del detalle, refrescamos ambas listas por si hubo un pago
+              _fetchDataNotas();
+              _fetchHistorial();
+            },
           ),
         );
       },

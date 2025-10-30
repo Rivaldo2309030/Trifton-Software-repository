@@ -1,10 +1,14 @@
-import 'package:distribuidora/screens/WelcomeScreen.dart';
 import 'package:distribuidora/screens/auth.dart';
 import 'package:flutter/material.dart';
 import 'package:distribuidora/screens/PedidosScreen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'embarque_screen.dart';
 import 'package:distribuidora/screens/sync_screen.dart';
+import 'dart:convert';
+import 'dart:io';
+import 'package:http/http.dart' as http;
+import 'package:distribuidora/services/api_config.dart';
+import 'package:distribuidora/widgets/offline_banner.dart'; // <-- AÑADIDO
 
 ///NO TENER 2 MAIN.DART
 const Color kCorporateBlue = Color(0xFF0B2C5D); // Azul marino
@@ -19,7 +23,7 @@ class ShipFormPage extends StatefulWidget {
 }
 
 class _ShipFormPageState extends State<ShipFormPage> {
-  final _formKey = GlobalKey<FormState>();
+
 
   @override
   Widget build(BuildContext context) {
@@ -67,12 +71,21 @@ class MainNavigationScreen extends StatefulWidget {
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _currentIndex = 0;
 
-  final List<Widget> _screens = const [
-    DashboardScreen(),
-    EmbarqueScreen(),
-    PedidosScreen(),
-    SyncScreen(), // <-- Pantalla añadida
-  ];
+  // Clave global para acceder al estado de PedidosScreen
+  final GlobalKey<PedidosScreenState> _pedidosScreenKey = GlobalKey<PedidosScreenState>();
+
+  late final List<Widget> _screens;
+
+  @override
+  void initState() {
+    super.initState();
+    _screens = [
+      const DashboardScreen(),
+      const EmbarqueScreen(),
+      PedidosScreen(key: _pedidosScreenKey), // Asignar la clave
+      const SyncScreen(),
+    ];
+  }
 
   final List<String> _titles = const [
     "TRITON SOFTWARE",
@@ -81,111 +94,49 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     "SINCRONIZACIÓN",
   ];
 
+
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final bool isLargeScreen = constraints.maxWidth >= 1000;
+
 
         return Scaffold(
           appBar: _TritonAppBar(title: _titles[_currentIndex]),
-          drawer: isLargeScreen ? null : _buildDrawer(),
-          body: SafeArea(
-            child: Row(
-              children: [
-                if (isLargeScreen) _buildNavigationRail(),
-                Expanded(
+          drawer: _buildDrawer(), // Cajón lateral siempre disponible
+          body: Column( // <-- AÑADIDO
+            children: [
+              const OfflineBanner(), // <-- AÑADIDO
+              Expanded(
+                child: SafeArea(
                   child: AnimatedSwitcher(
                     duration: const Duration(milliseconds: 280),
                     child: IndexedStack(
-                      // Usar IndexedStack para mantener el estado de las pantallas
                       index: _currentIndex,
                       children: _screens,
                     ),
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-          bottomNavigationBar: isLargeScreen
-              ? null
-              : _buildBottomNavigationBar(),
+          bottomNavigationBar: null, // Barra inferior eliminada
         );
       },
     );
   }
 
-  Widget _buildBottomNavigationBar() {
-    return NavigationBar(
-      selectedIndex: _currentIndex,
-      onDestinationSelected: (i) => setState(() => _currentIndex = i),
-      destinations: const [
-        NavigationDestination(
-          icon: Icon(Icons.dashboard_outlined),
-          selectedIcon: Icon(Icons.dashboard, color: kCorporateBlue),
-          label: "Inicio",
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.local_shipping_outlined),
-          selectedIcon: Icon(Icons.local_shipping, color: kCorporateBlue),
-          label: "Embarque",
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.shopping_cart_outlined),
-          selectedIcon: Icon(Icons.shopping_cart, color: kCorporateBlue),
-          label: "Pedidos",
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.sync_alt_outlined),
-          selectedIcon: Icon(Icons.sync_alt, color: kCorporateBlue),
-          label: "Sincronizar",
-        ),
-      ],
-    );
-  }
 
-  Widget _buildNavigationRail() {
-    return NavigationRail(
-      selectedIndex: _currentIndex,
-      onDestinationSelected: (i) => setState(() => _currentIndex = i),
-      labelType: NavigationRailLabelType.all,
-      backgroundColor: Colors.white,
-      selectedIconTheme: const IconThemeData(color: kCorporateBlue),
-      selectedLabelTextStyle: const TextStyle(
-        color: kCorporateBlue,
-        fontWeight: FontWeight.bold,
-      ),
-      destinations: const [
-        NavigationRailDestination(
-          icon: Icon(Icons.dashboard_outlined),
-          selectedIcon: Icon(Icons.dashboard),
-          label: Text("Inicio"),
-        ),
-        NavigationRailDestination(
-          icon: Icon(Icons.local_shipping_outlined),
-          selectedIcon: Icon(Icons.local_shipping),
-          label: Text("Embarque"),
-        ),
-        NavigationRailDestination(
-          icon: Icon(Icons.shopping_cart_outlined),
-          selectedIcon: Icon(Icons.shopping_cart),
-          label: Text("Pedidos"),
-        ),
-        NavigationRailDestination(
-          icon: Icon(Icons.sync_alt_outlined),
-          selectedIcon: Icon(Icons.sync_alt),
-          label: Text("Sincronizar"),
-        ),
-      ],
-    );
-  }
+
+
 
   Drawer _buildDrawer() {
     return Drawer(
       child: Column(
         children: [
-          const UserAccountsDrawerHeader(
-            decoration: BoxDecoration(
+          UserAccountsDrawerHeader(
+            decoration: const BoxDecoration(
               gradient: LinearGradient(
                 colors: [kCorporateBlue, kCorporateBlueDark],
                 begin: Alignment.topLeft,
@@ -194,7 +145,13 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
             ),
             currentAccountPicture: CircleAvatar(
               backgroundColor: Colors.white,
-              child: Icon(Icons.business, color: kCorporateBlue, size: 36),
+              child: Padding(
+                padding: const EdgeInsets.all(4.0), // Ajusta el padding si es necesario
+                child: Image.asset(
+                  'assets/img/logo_triton_principal.png',
+                  fit: BoxFit.cover,
+                ),
+              ),
             ),
             accountName: Text(
               "TRITON SOFTWARE",
@@ -220,7 +177,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
               await prefs.remove('idusuario');
               await prefs.remove('username');
               // o: await prefs.clear(); // para borrar todo
+              if (!mounted) return; // Add mounted check here
               if (Navigator.canPop(context)) Navigator.pop(context);
+              if (!mounted) return; // Add mounted check here
               Navigator.pushReplacement(
                 context,
                 MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -269,16 +228,10 @@ class _TritonAppBar extends StatelessWidget implements PreferredSizeWidget {
       toolbarHeight: 80,
       foregroundColor: Colors.white,
       iconTheme: const IconThemeData(color: Colors.white),
-      title: Text(
-        title,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 22,
-          fontWeight: FontWeight.w900,
-          fontFamily: 'Arial Black',
-          fontFamilyFallback: ['Arial', 'sans-serif'],
-          letterSpacing: 1.2,
-        ),
+      title: Image.asset(
+        'assets/img/marcaTriton.png',
+        height: 35, // Ajusta la altura según sea necesario
+        fit: BoxFit.contain,
       ),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(bottom: Radius.circular(26)),
@@ -300,60 +253,135 @@ class _TritonAppBar extends StatelessWidget implements PreferredSizeWidget {
 }
 
 /// ===================== DASHBOARD =====================
-class DashboardScreen extends StatelessWidget {
+class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
+
+  @override
+  State<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends State<DashboardScreen> {
+  Map<String, dynamic> _dashboardData = {
+    "pedidos": {"current": 0, "previous": 0, "trend": "0%"},
+    "embarques": {"current": 0, "previous": 0, "trend": "0%"},
+    "clientes": {"current": 0, "previous": 0, "trend": "0%"},
+  };
+  bool _isLoading = true;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchDashboardData();
+  }
+
+  Future<void> _fetchDashboardData() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    final String url = '${ApiConfig.baseUrl}api_dashboard_data.php';
+
+    try {
+      final response = await http.get(Uri.parse(url));
+
+      if (response.statusCode == 200) {
+        final responseData = jsonDecode(response.body);
+        if (responseData["status"] == "success") {
+          setState(() {
+            _dashboardData = responseData["data"];
+          });
+        } else {
+          _errorMessage = responseData["message"] ?? "Error al cargar datos del dashboard.";
+        }
+      } else {
+        _errorMessage = "Error del servidor: ${response.statusCode}";
+      }
+    } on SocketException {
+      _errorMessage = "Sin conexión a internet. No se pudieron cargar los datos del dashboard.";
+    } catch (e) {
+      _errorMessage = "Error al obtener datos: $e";
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final double w = MediaQuery.of(context).size.width;
     final double scale = (w / 390).clamp(0.9, 1.25);
 
-    return CustomScrollView(
-      slivers: [
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
-            child: _WelcomeBanner(scale: scale),
-          ),
-        ),
-        SliverPadding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          sliver: SliverGrid(
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 320,
-              crossAxisSpacing: 16,
-              mainAxisSpacing: 16,
-              childAspectRatio: 1.05,
+    return RefreshIndicator(
+      onRefresh: _fetchDashboardData,
+      child: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
+              child: _WelcomeBanner(scale: scale),
             ),
-            delegate: SliverChildListDelegate.fixed([
-              _KpiCard(
-                title: "Pedidos",
-                value: "128",
-                trend: "+12%",
-                icon: Icons.shopping_cart,
-                gradient: const [Color(0xFF1B4F72), Color(0xFF0B2C5D)],
-                scale: scale,
-              ),
-              _KpiCard(
-                title: "Embarques",
-                value: "42",
-                trend: "+3%",
-                icon: Icons.local_shipping,
-                gradient: const [Color(0xFF0CA678), Color(0xFF087F5B)],
-                scale: scale,
-              ),
-              _KpiCard(
-                title: "Clientes",
-                value: "87",
-                trend: "+6%",
-                icon: Icons.people,
-                gradient: const [Color(0xFFFF8C42), Color(0xFFEB5E28)],
-                scale: scale,
-              ),
-            ]),
           ),
-        ),
-      ],
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            sliver: _isLoading
+                ? SliverFillRemaining(
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                : _errorMessage != null
+                    ? SliverFillRemaining(
+                        child: Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16.0),
+                            child: Text(
+                              _errorMessage!,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: Colors.red, fontSize: 16),
+                            ),
+                          ),
+                        ),
+                      )
+                    : SliverGrid(
+                        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                          maxCrossAxisExtent: 320,
+                          crossAxisSpacing: 16,
+                          mainAxisSpacing: 16,
+                          childAspectRatio: 1.05,
+                        ),
+                        delegate: SliverChildListDelegate.fixed([
+                          _KpiCard(
+                            title: "Pedidos",
+                            value: _dashboardData["pedidos"]["current"].toString(),
+                            trend: _dashboardData["pedidos"]["trend"],
+                            icon: Icons.shopping_cart,
+                            gradient: const [Color(0xFF1B4F72), Color(0xFF0B2C5D)],
+                            scale: scale,
+                          ),
+                          _KpiCard(
+                            title: "Embarques",
+                            value: _dashboardData["embarques"]["current"].toString(),
+                            trend: _dashboardData["embarques"]["trend"],
+                            icon: Icons.local_shipping,
+                            gradient: const [Color(0xFF0CA678), Color(0xFF087F5B)],
+                            scale: scale,
+                          ),
+                          _KpiCard(
+                            title: "Clientes",
+                            value: _dashboardData["clientes"]["current"].toString(),
+                            trend: _dashboardData["clientes"]["trend"],
+                            icon: Icons.people,
+                            gradient: const [Color(0xFFFF8C42), Color(0xFFEB5E28)],
+                            scale: scale,
+                          ),
+                        ]),
+                      ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -376,7 +404,7 @@ class _WelcomeBanner extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: kCorporateBlue.withOpacity(.22),
+            color: kCorporateBlue.withAlpha((255 * .22).round()),
             blurRadius: 18,
             offset: const Offset(0, 10),
           ),
@@ -397,7 +425,7 @@ class _WelcomeBanner extends StatelessWidget {
                 Text(
                   "Bienvenido",
                   style: TextStyle(
-                    color: Colors.white.withOpacity(.95),
+                    color: Colors.white.withAlpha((255 * .95).round()),
                     fontSize: 14 * scale,
                     fontWeight: FontWeight.w700,
                     fontFamily: 'Arial Black',
@@ -449,7 +477,7 @@ class _KpiCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: gradient.last.withOpacity(.30),
+            color: gradient.last.withAlpha((255 * .30).round()),
             blurRadius: 16,
             offset: const Offset(0, 10),
           ),
@@ -465,7 +493,7 @@ class _KpiCard extends StatelessWidget {
               height: 120,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.white.withOpacity(.08),
+                color: Colors.white.withAlpha((255 * .08).round()),
               ),
             ),
           ),
@@ -477,7 +505,7 @@ class _KpiCard extends StatelessWidget {
               height: 80,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.white.withOpacity(.06),
+                color: Colors.white.withAlpha((255 * .06).round()),
               ),
             ),
           ),
@@ -487,7 +515,7 @@ class _KpiCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 CircleAvatar(
-                  backgroundColor: Colors.white.withOpacity(.18),
+                  backgroundColor: Colors.white.withAlpha((255 * .18).round()),
                   radius: 24 * scale,
                   child: Icon(icon, color: Colors.white, size: 24 * scale),
                 ),

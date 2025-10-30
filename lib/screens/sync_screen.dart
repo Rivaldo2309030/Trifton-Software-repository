@@ -1,9 +1,11 @@
 import 'dart:convert';
+import 'dart:io'; // Import for SocketException
 import 'package:distribuidora/services/api_config.dart';
 import 'package:http/http.dart' as http;
 import 'package:distribuidora/services/database_helper.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:connectivity_plus/connectivity_plus.dart'; // Import for connectivity_plus
 
 class SyncScreen extends StatefulWidget {
   const SyncScreen({super.key});
@@ -65,6 +67,17 @@ class _SyncScreenState extends State<SyncScreen> {
       _uploadingIds.add(localId);
     });
 
+    var connectivityResult = await (Connectivity().checkConnectivity());
+    if (connectivityResult.contains(ConnectivityResult.none)) {
+      _showConnectivitySnackBar('No hay conexión a internet. No se pudo subir el embarque ID $localId.');
+      if (mounted) {
+        setState(() {
+          _uploadingIds.remove(localId);
+        });
+      }
+      return false;
+    }
+
     bool success = false;
     try {
       final db = DatabaseHelper.instance;
@@ -85,20 +98,28 @@ class _SyncScreenState extends State<SyncScreen> {
       if (response.statusCode == 201) {
         await db.deleteLocalEmbarque(localId);
         if (refreshList) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('✅ Embarque subido y sincronizado!'), backgroundColor: Colors.green),
-          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('✅ Embarque subido y sincronizado!'), backgroundColor: Colors.green),
+            );
+          }
         }
         success = true;
       } else {
         final errorData = json.decode(response.body);
         throw Exception(errorData['error'] ?? 'Error desconocido del servidor');
       }
+    } on SocketException {
+      if (mounted && refreshList) {
+        _showConnectivitySnackBar('No se pudo conectar al servidor para subir el embarque ID $localId. Verifica tu conexión a internet.');
+      }
     } catch (e) {
       if (mounted && refreshList) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('❌ Error al subir ID $localId: $e'), backgroundColor: Colors.red),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('❌ Error al subir ID $localId: $e'), backgroundColor: Colors.red),
+          );
+        }
       }
     } finally {
       if (mounted) {
@@ -122,9 +143,11 @@ class _SyncScreenState extends State<SyncScreen> {
     int exitosos = 0;
     int fallidos = 0;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Iniciando subida masiva de ${idsParaSubir.length} embarques...'), backgroundColor: Colors.blue),
-    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Iniciando subida masiva de ${idsParaSubir.length} embarques...'), backgroundColor: Colors.blue),
+      );
+    }
 
     for (final id in idsParaSubir) {
       final success = await _subirEmbarque(id, refreshList: false);
@@ -135,9 +158,11 @@ class _SyncScreenState extends State<SyncScreen> {
       }
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Sincronización completada. Éxito: $exitosos, Fallidos: $fallidos'), backgroundColor: fallidos > 0 ? Colors.orange : Colors.green),
-    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Sincronización completada. Éxito: $exitosos, Fallidos: $fallidos'), backgroundColor: fallidos > 0 ? Colors.orange : Colors.green),
+      );
+    }
 
     if (mounted) {
       setState(() { _isBulkUploading = false; });
@@ -236,6 +261,15 @@ class _SyncScreenState extends State<SyncScreen> {
             onPressed: _loadUnsyncedEmbarques,
           )
         ],
+      ),
+    );
+  }
+
+  void _showConnectivitySnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
       ),
     );
   }

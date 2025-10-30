@@ -8,7 +8,50 @@ import 'package:distribuidora/services/database_helper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:distribuidora/services/api_config.dart';
 
+
 // --- Modelos de Datos Refactorizados ---
+
+class Estatus {
+  final int id;
+  final String clave;
+  Estatus({required this.id, required this.clave});
+
+  factory Estatus.fromJson(Map<String, dynamic> json) {
+    return Estatus(
+      id: int.tryParse(json['idestatus'].toString()) ?? 0,
+      clave: json['clave'] ?? 'N/A',
+    );
+  }
+}
+
+class EmbarqueDetalleProducto {
+  final int iddetalle;
+  final String nombreproducto;
+  final double cantidad;
+  int idestatus; // Mutable
+  final int idproducto;
+  final int idunidad;
+
+  EmbarqueDetalleProducto({
+    required this.iddetalle,
+    required this.nombreproducto,
+    required this.cantidad,
+    required this.idestatus,
+    required this.idproducto,
+    required this.idunidad,
+  });
+
+  factory EmbarqueDetalleProducto.fromJson(Map<String, dynamic> json) {
+    return EmbarqueDetalleProducto(
+      iddetalle: int.tryParse(json['iddetalle'].toString()) ?? 0,
+      nombreproducto: json['nombreproducto'] ?? 'N/A',
+      cantidad: (json['cantidad'] as num).toDouble(),
+      idestatus: int.tryParse(json['idestatus'].toString()) ?? 0,
+      idproducto: int.tryParse(json['idproducto'].toString()) ?? 0,
+      idunidad: int.tryParse(json['idunidad'].toString()) ?? 0,
+    );
+  }
+}
 
 class Almacen {
   final int id;
@@ -68,12 +111,13 @@ class Unidad {
 class Cliente {
   final int id;
   final String nombre;
+
   Cliente({required this.id, required this.nombre});
 
   factory Cliente.fromJson(Map<String, dynamic> json) {
     return Cliente(
       id: int.tryParse(json['idcliente'].toString()) ?? 0,
-      nombre: json['nombrecliente'],
+      nombre: json['nombrecliente'] ?? 'N/A',
     );
   }
 
@@ -202,11 +246,14 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
 
   // --- Info de Usuario ---
   String _username = 'Usuario';
+  Key _autocompleteKey = UniqueKey();
 
   // --- Estado para la pestaña de Consulta ---
   List<EmbarqueConsulta> _embarquesConsultados = [];
   bool _isConsultando = true;
   DateTime _fechaFiltro = DateTime.now();
+  int? _editingEmbarqueId; // ID del embarque que se está editando
+  int? _selectedAlmacenFiltroId; // <<< NUEVO ESTADO PARA FILTRO DE ALMACÉN
 
   // --- Catalogos (dinamicos) ---
   List<Almacen> _almacenes = [];
@@ -214,6 +261,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
   List<Producto> _productos = [];
   List<Cliente> _clientes = [];
   List<Almacenista> _almacenistas = [];
+  List<Estatus> _estatusList = [];
   bool _isLoading = true;
 
   // --- Estado de filtros/encabezado ---
@@ -240,6 +288,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
     _tabController = TabController(length: 2, vsync: this);
     _loadUserData();
     _fetchCatalogos();
+    _fetchEstatusList();
     _consultarEmbarques(); // Carga inicial para la pestaña de consulta
 
     _tabController.addListener(() {
@@ -282,6 +331,25 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
         MaterialPageRoute(builder: (context) => const LoginScreen()),
         (Route<dynamic> route) => false,
       );
+    }
+  }
+
+  Future<void> _fetchEstatusList() async {
+    try {
+      final response = await http.get(Uri.parse('${ApiConfig.baseUrl}api_estatus_movimiento.php'));
+      if (response.statusCode == 200) {
+        final decoded = json.decode(response.body);
+        if (decoded['success'] == true) {
+          final List<dynamic> data = decoded['data'];
+          if (mounted) {
+            setState(() {
+              _estatusList = data.map((json) => Estatus.fromJson(json)).toList();
+            });
+          }
+        }
+      }
+    } catch (e) {
+      print('Error fetching estatus list: $e');
     }
   }
 
@@ -390,50 +458,56 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
     final idProducto = _selectedProducto!.id;
     final idUnidad = _selectedUnidadId!;
 
-    // 1. Intentar obtener el precio del caché local
+    // 1. Carga optimista desde la caché local para una UI instantánea
     final localPrice = await db.getPrecio(idCliente, idProducto, idUnidad);
-
     if (localPrice != null) {
       setState(() {
         _precioUnitarioDinamico = localPrice;
       });
-      return; // Precio encontrado en caché, no es necesario ir al servidor
     }
 
-    // 2. Si no está en caché, ir al servidor
-    final url = Uri.parse('${ApiConfig.baseUrl}api_precios.php?idcliente=$idCliente&idproducto=$idProducto&idunidad=$idUnidad');
-
-    print('--- BUSCANDO PRECIO CON URL: $url ---'); // Linea de depuración
-
+    // 2. Validar con el servidor si hay conexión
     try {
-      final response = await http.get(url).timeout(const Duration(seconds: 5));
+      final url = Uri.parse('${ApiConfig.baseUrl}api_precios.php?idcliente=$idCliente&idproducto=$idProducto&idunidad=$idUnidad');
+      final response = await http.get(url).timeout(const Duration(seconds: 7));
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data['preciounitario'] != null) {
-          final serverPrice = (data['preciounitario'] as num).toDouble();
-          setState(() {
-            _precioUnitarioDinamico = serverPrice;
-          });
-          // 3. Guardar el precio recién obtenido en el caché local
-          await db.insertOrUpdatePrecio({
-            'idcliente': idCliente,
-            'idproducto': idProducto,
-            'idunidad': idUnidad,
-            'preciounitario': serverPrice,
-          });
+          final serverPrice = double.tryParse(data['preciounitario'].toString()) ?? 0.0;
+
+          // 3. Actualizar UI y caché si el precio del servidor es diferente
+          if (_precioUnitarioDinamico != serverPrice) {
+            setState(() {
+              _precioUnitarioDinamico = serverPrice;
+            });
+            await db.insertOrUpdatePrecio({
+              'idcliente': idCliente,
+              'idproducto': idProducto,
+              'idunidad': idUnidad,
+              'preciounitario': serverPrice,
+            });
+          }
         } else {
-          _snack('No se encontró un precio para esta combinación. Se usará 0.0.', color: Colors.orange);
-          setState(() => _precioUnitarioDinamico = 0.0);
+           if (localPrice == null) { // Si no teníamos precio local y el servidor tampoco tiene
+             _snack('No se encontró un precio para esta combinación. Se usará 0.0.', color: Colors.orange);
+             setState(() => _precioUnitarioDinamico = 0.0);
+           }
         }
       } else {
         throw Exception('Error del servidor: ${response.statusCode}');
       }
     } on SocketException {
-      _snack('Sin conexión. Ingresa el precio manualmente.', color: Colors.orange);
-      setState(() => _precioUnitarioDinamico = 0.0);
+      if (localPrice == null) { // Si no hay conexión y tampoco teníamos precio local
+        _snack('Sin conexión. Ingresa el precio manualmente.', color: Colors.orange);
+        setState(() => _precioUnitarioDinamico = 0.0);
+      }
+      // Si hay un precio local, simplemente se usa y no se muestra error.
     } catch (e) {
-      _snack('Error al obtener precio: $e. Se usará 0.0.', color: Colors.red);
-      setState(() => _precioUnitarioDinamico = 0.0);
+      if (localPrice == null) { // Si falla por otra razón y no hay precio local
+        _snack('Error al obtener precio: $e. Se usará 0.0.', color: Colors.red);
+        setState(() => _precioUnitarioDinamico = 0.0);
+      }
     }
   }
 
@@ -480,9 +554,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
         'idestatus': 1, // ID de estatus por defecto 'EE'
       });
       
-      // Limpiar controles
-      _selectedProducto = null;
-      _productoAutocompleteCtrl.clear();
+      // Limpiar controles (parcialmente, según nuevo requerimiento)
       cantidadCtrl.text = '1';
       _precioUnitarioDinamico = null;
     });
@@ -525,6 +597,8 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
       _productoAutocompleteCtrl.clear();
       cantidadCtrl.text = '1';
       _precioUnitarioDinamico = null;
+      _editingEmbarqueId = null; // Reiniciar modo edición
+      _autocompleteKey = UniqueKey(); // Forzar la reconstrucción del Autocomplete
     });
   }
 
@@ -584,42 +658,56 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
   }
 
   Future<void> _guardarEmbarqueEnServidor() async {
+    final bool isEditing = _editingEmbarqueId != null;
     final Map<String, dynamic> payload = await _buildPayload();
     if (payload.isEmpty) return;
 
-    final url = Uri.parse('${ApiConfig.baseUrl}api_embarques.php');
+    final String apiEndpoint = isEditing ? 'api_editar_embarque.php' : 'api_embarques.php';
+    final url = Uri.parse('${ApiConfig.baseUrl}$apiEndpoint');
+
+    // Si estamos editando, añadimos el ID del embarque al payload
+    if (isEditing) {
+      payload['idfolioembarque'] = _editingEmbarqueId;
+    }
 
     try {
       final response = await http.post(
         url,
         headers: {'Content-Type': 'application/json; charset=UTF-8'},
         body: jsonEncode(payload),
-      ).timeout(const Duration(seconds: 10)); // Timeout de 10 segundos
+      ).timeout(const Duration(seconds: 10));
 
-      if (response.statusCode == 201) {
+      if (response.statusCode == 200 || response.statusCode == 201) {
         final data = json.decode(response.body);
-        _snack('✅ Embarque guardado en servidor. Folio: ${data['idfolioembarque']}', color: Colors.green);
+        _snack(data['message'] ?? (isEditing ? '✅ Embarque actualizado' : '✅ Embarque guardado'), color: Colors.green);
         _limpiarFormulario();
+        _consultarEmbarques();
+        _tabController.animateTo(1); // Volver a la pestaña de consulta
       } else {
         final errorData = json.decode(response.body);
         final errorMessage = '❌ Error del servidor: ${errorData['error'] ?? 'Desconocido'}.';
         if (kIsWeb) {
           _snack(errorMessage, color: Colors.red);
         } else {
-          _snack('$errorMessage Intentando guardado local.', color: Colors.orange);
-          await _guardarEmbarqueLocalmente(payload: payload);
+          // En modo de creación, se puede intentar el guardado local. En edición no.
+          if (!isEditing) {
+             _snack('$errorMessage Intentando guardado local.', color: Colors.orange);
+             await _guardarEmbarqueLocalmente(payload: payload);
+          } else {
+             _snack(errorMessage, color: Colors.red);
+          }
         }
       }
     } on SocketException catch (_) {
-      if (kIsWeb) {
-        _snack('🔌 Sin conexión. No se puede guardar en la versión web.', color: Colors.red);
+      if (kIsWeb || isEditing) {
+        print('🔌 Sin conexión. No se puede ${isEditing ? 'editar' : 'guardar en la web'}.');
       } else {
-        _snack('🔌 Sin conexión. Guardando localmente...', color: Colors.orange);
+        print('🔌 Sin conexión. Guardando localmente...');
         await _guardarEmbarqueLocalmente(payload: payload);
       }
     } catch (e) {
       final errorMessage = '❌ Error inesperado: $e.';
-      if (kIsWeb) {
+       if (kIsWeb || isEditing) {
         _snack(errorMessage, color: Colors.red);
       } else {
         _snack('$errorMessage Guardando localmente...', color: Colors.orange);
@@ -640,7 +728,13 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
       final fechaAFiltrar = fecha ?? _fechaFiltro;
       final formattedDate = "${fechaAFiltrar.year}-${fechaAFiltrar.month.toString().padLeft(2, '0')}-${fechaAFiltrar.day.toString().padLeft(2, '0')}";
       
-      final url = Uri.parse('${ApiConfig.baseUrl}api_consulta_embarques.php?fecha=$formattedDate');
+      // Construcción de la URL con el nuevo filtro opcional
+      String urlString = '${ApiConfig.baseUrl}api_consulta_embarques.php?fecha=$formattedDate';
+      if (_selectedAlmacenFiltroId != null) {
+        urlString += '&idalmacen=$_selectedAlmacenFiltroId';
+      }
+      
+      final url = Uri.parse(urlString);
       
       final response = await http.get(url);
 
@@ -681,12 +775,194 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
     }
   }
 
+  Future<void> _actualizarEstatusProducto(int iddetalle, int nuevoIdEstatus) async {
+    final url = Uri.parse('${ApiConfig.baseUrl}api_cambiar_estatus_producto.php');
+    try {
+      final response = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json; charset=UTF-8'},
+        body: jsonEncode({'iddetalle': iddetalle, 'idestatus': nuevoIdEstatus}),
+      );
+      if (response.statusCode == 200) {
+        final decoded = json.decode(response.body);
+        if (decoded['status'] == 'success') {
+          _snack('Estatus actualizado.', color: Colors.green);
+        } else {
+          throw Exception(decoded['message'] ?? 'Error al actualizar');
+        }
+      } else {
+        throw Exception('Error del servidor: ${response.statusCode}');
+      }
+    } catch (e) {
+      _snack('Error: $e', color: Colors.red);
+    }
+  }
+
+  void _mostrarDialogoDetalles(EmbarqueConsulta embarque) async {
+    // Muestra un loader mientras se cargan los detalles
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
+    List<EmbarqueDetalleProducto> detalles = [];
+    try {
+      final url = Uri.parse('${ApiConfig.baseUrl}api_embarque_detalle.php?idfolioembarque=${embarque.idfolioembarque}');
+      final response = await http.get(url);
+      Navigator.of(context).pop(); // Cierra el loader
+
+      if (response.statusCode == 200) {
+        final decoded = json.decode(response.body);
+        if (decoded['success'] == true) {
+          final List<dynamic> data = decoded['data'];
+          detalles = data.map((json) => EmbarqueDetalleProducto.fromJson(json)).toList();
+        } else {
+          throw Exception(decoded['error'] ?? 'Error al cargar detalles');
+        }
+      } else {
+        throw Exception('Error de conexión: ${response.statusCode}');
+      }
+    } catch (e) {
+      Navigator.of(context).pop(); // Asegúrate de cerrar el loader en caso de error
+      _snack('Error al cargar detalles: $e', color: Colors.red);
+      return;
+    }
+
+    // Muestra el diálogo con los detalles
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateInDialog) {
+            return AlertDialog(
+              title: Text('Detalle del Embarque #${embarque.idfolioembarque}'),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: _estatusList.isEmpty
+                    ? const Center(child: Text('Cargando configuración de estatus...'))
+                    : ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: detalles.length,
+                        itemBuilder: (context, index) {
+                          final producto = detalles[index];
+                          return Card(
+                            margin: const EdgeInsets.symmetric(vertical: 4),
+                            child: ListTile(
+                              title: Text(producto.nombreproducto),
+                              subtitle: Text('Cantidad: ${producto.cantidad}'),
+                              trailing: DropdownButton<int>(
+                                value: producto.idestatus,
+                                items: _estatusList.map((estatus) {
+                                  return DropdownMenuItem<int>(
+                                    value: estatus.id,
+                                    child: Text(estatus.clave),
+                                  );
+                                }).toList(),
+                                onChanged: (newId) {
+                                  if (newId != null && newId != producto.idestatus) {
+                                    _actualizarEstatusProducto(producto.iddetalle, newId).then((_) {
+                                      // Actualiza el estado localmente para reflejar el cambio en la UI
+                                      setStateInDialog(() {
+                                        producto.idestatus = newId;
+                                      });
+                                    });
+                                  }
+                                },
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('CERRAR'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _generarNota(EmbarqueConsulta embarque) async {
+    final bool? confirmar = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Generar Nota de Venta'),
+        content: Text('¿Estás seguro de que deseas generar la nota para el embarque #${embarque.idfolioembarque}?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('CANCELAR')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('SÍ, GENERAR')),
+        ],
+      ),
+    );
+
+    if (confirmar != true) return;
+
+    setState(() => _isConsultando = true);
+
+    try {
+      // 1. Fetch the details of the embarque
+      final detallesUrl = Uri.parse('${ApiConfig.baseUrl}api_embarque_detalle.php?idfolioembarque=${embarque.idfolioembarque}');
+      final detallesResponse = await http.get(detallesUrl);
+      if (detallesResponse.statusCode != 200) throw Exception('Error al obtener detalles del embarque.');
+      
+      final detallesDecoded = json.decode(detallesResponse.body);
+      if (detallesDecoded['success'] != true) throw Exception(detallesDecoded['error'] ?? 'Error del servidor al obtener detalles.');
+      
+      final List<dynamic> detallesData = detallesDecoded['data'];
+      if (detallesData.isEmpty) throw Exception('Este embarque no tiene productos para generar una nota.');
+
+      // 2. Build the payload for the nota API - USANDO EL ALMACEN ORIGINAL DEL EMBARQUE
+      final payload = {
+        'id_embarque': embarque.idfolioembarque,
+        'id_usuario': embarque.idusuario,
+        'id_cliente': embarque.idcliente,
+        'id_almacen': embarque.idalmacen, // Se usa el idalmacen del embarque original
+        'detalles': detallesData.map((d) => {
+          'idproducto': d['idproducto'],
+          'idunidad': d['idunidad'],
+          'cantidad': d['cantidad'],
+          'precio': d['preciounitario'],
+        }).toList(),
+      };
+
+      // 3. Call the generate nota API
+      final notaUrl = Uri.parse('${ApiConfig.baseUrl}api_generar_nota.php');
+      final notaResponse = await http.post(
+        notaUrl,
+        headers: {'Content-Type': 'application/json; charset=UTF-8'},
+        body: jsonEncode(payload),
+      );
+
+      if (mounted) {
+        final notaDecoded = json.decode(notaResponse.body);
+        if (notaResponse.statusCode == 201 && notaDecoded['success'] == true) {
+          _snack('✅ Nota #${notaDecoded['idnota']} generada correctamente.', color: Colors.green);
+          _consultarEmbarques(); // Refrescar la lista de embarques
+        } else {
+          throw Exception(notaDecoded['error'] ?? 'Error desconocido al generar la nota.');
+        }
+      }
+
+    } catch (e) {
+      if (mounted) _snack('❌ Error: $e', color: Colors.red);
+    } finally {
+      if (mounted) setState(() => _isConsultando = false);
+    }
+  }
+
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFE9EDF3),
       body: SafeArea(
-        child: _isLoading
+        child: (_isLoading && _estatusList.isEmpty)
             ? const Center(child: CircularProgressIndicator())
             : Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -717,34 +993,29 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
                               children: [
                                 _CardWrap(
                                   child: LayoutBuilder(
-                                    builder: (context, c) {
-                                      final w = c.maxWidth;
-                                      final isPhone = w < 700;
-                                      final isTablet = w >= 700 && w < 1100;
-                                      
-                                      return GridView.count(
-                                        crossAxisCount: isPhone ? 2 : (isTablet ? 3 : 5),
-                                        mainAxisSpacing: 16,
-                                        crossAxisSpacing: 16,
-                                        childAspectRatio: isPhone ? 3.2 : (isTablet ? 3.4 : 3.2),
-                                        shrinkWrap: true,
-                                        physics: const NeverScrollableScrollPhysics(),
+                                    builder: (context, constraints) {
+                                      return Wrap(
+                                        spacing: 16, // Espacio horizontal
+                                        runSpacing: 16, // Espacio vertical cuando se envuelve
                                         children: [
-                                          _buildDropdown<int>(
+                                          _buildResponsiveDropdown(
+                                            constraints: constraints,
                                             label: 'Almacén',
                                             icon: Icons.store_mall_directory_outlined,
                                             value: _selectedAlmacenId,
                                             items: _almacenes.map((a) => DropdownMenuItem<int>(value: a.id, child: Text(a.nombre))).toList(),
                                             onChanged: (v) => setState(() => _selectedAlmacenId = v),
                                           ),
-                                          _buildDropdown<int>(
+                                          _buildResponsiveDropdown(
+                                            constraints: constraints,
                                             label: 'Almacenista',
                                             icon: Icons.badge_outlined,
                                             value: _selectedAlmacenistaId,
                                             items: _almacenistas.map((a) => DropdownMenuItem<int>(value: a.id, child: Text(a.nombre))).toList(),
                                             onChanged: (v) => setState(() => _selectedAlmacenistaId = v),
                                           ),
-                                          _buildDropdown<int>(
+                                          _buildResponsiveDropdown(
+                                            constraints: constraints,
                                             label: 'Unidad',
                                             icon: Icons.straighten,
                                             value: _selectedUnidadId,
@@ -754,7 +1025,8 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
                                               _fetchPrecio();
                                             },
                                           ),
-                                          _buildDropdown<int>(
+                                          _buildResponsiveDropdown(
+                                            constraints: constraints,
                                             label: 'Cliente',
                                             icon: Icons.person_outline,
                                             value: _selectedClienteId,
@@ -791,6 +1063,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
                                             SizedBox(
                                               width: isSmall ? double.infinity : c.maxWidth * 0.5,
                                               child: Autocomplete<Producto>(
+                                                key: _autocompleteKey,
                                                 displayStringForOption: (Producto option) => option.nombre,
                                                 optionsBuilder: (TextEditingValue textEditingValue) {
                                                   if (textEditingValue.text == '') {
@@ -803,14 +1076,11 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
                                                 onSelected: (Producto selection) {
                                                   setState(() {
                                                     _selectedProducto = selection;
+                                                    _productoAutocompleteCtrl.text = selection.nombre; // Mantener el texto
                                                   });
                                                   _fetchPrecio();
                                                 },
                                                 fieldViewBuilder: (BuildContext context, TextEditingController fieldController, FocusNode fieldFocusNode, VoidCallback onFieldSubmitted) {
-                                                  // Asignar el controlador externo
-                                                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                                                    fieldController.text = _productoAutocompleteCtrl.text;
-                                                  });
                                                   return TextField(
                                                     controller: fieldController,
                                                     focusNode: fieldFocusNode,
@@ -967,41 +1237,45 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
                                 const SizedBox(height: 16),
 
                                 // Botones de acción
-                                LayoutBuilder(
-                                  builder: (context, c) {
-                                    return GridView.count(
-                                      crossAxisCount: 3,
-                                      crossAxisSpacing: 10,
-                                      mainAxisSpacing: 10,
-                                      childAspectRatio: 3.6,
-                                      shrinkWrap: true,
-                                      physics: const NeverScrollableScrollPhysics(),
+                                _editingEmbarqueId != null
+                                  // --- BOTONES EN MODO EDICIÓN ---
+                                  ? Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceAround,
                                       children: [
-                                        _actionBtnModern(
-                                          icon: Icons.save_outlined,
-                                          text: 'GUARDAR LOCALMENTE',
-                                          background: kIsWeb ? Colors.grey.shade400 : const Color(0xFF6C757D),
-                                          border: kIsWeb ? Colors.grey.shade500 : const Color(0xFF495057),
-                                          onPressed: kIsWeb ? () => _snack('El guardado local no está disponible en la web.', color: Colors.blue) : _guardarEmbarqueLocalmente,
+                                        Expanded(
+                                          child: _actionBtnModern(
+                                            icon: Icons.cancel_outlined,
+                                            text: 'CANCELAR EDICIÓN',
+                                            background: Colors.red.shade700,
+                                            border: Colors.red.shade900,
+                                            onPressed: _limpiarFormulario,
+                                          ),
                                         ),
-                                        _actionBtnModern(
+                                        const SizedBox(width: 16),
+                                        Expanded(
+                                          child: _actionBtnModern(
+                                            icon: Icons.save_as_outlined,
+                                            text: 'ACTUALIZAR',
+                                            background: Colors.blue.shade700,
+                                            border: Colors.blue.shade900,
+                                            onPressed: _guardarEmbarqueEnServidor,
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  // --- BOTÓN EN MODO CREACIÓN ---
+                                  : Center(
+                                      child: SizedBox(
+                                        width: MediaQuery.of(context).size.width * 0.6,
+                                        child: _actionBtnModern(
                                           icon: Icons.cloud_upload_outlined,
                                           text: 'GUARDAR',
                                           background: const Color(0xFF1E3A8A),
                                           border: const Color(0xFF1D4ED8),
                                           onPressed: _guardarEmbarqueEnServidor,
                                         ),
-                                        _actionBtnModern(
-                                          icon: Icons.print_outlined,
-                                          text: 'IMPRIMIR',
-                                          background: const Color(0xFF0F766E),
-                                          border: const Color(0xFF115E59),
-                                          onPressed: () => _snack('Enviando a impresión (demo)', color: Colors.teal),
-                                        ),
-                                      ],
-                                    );
-                                  },
-                                ),
+                                      ),
+                                    ),
                               ],
                             ),
                           ),
@@ -1081,10 +1355,36 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
           borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: Color(0xFF1E3A8A), width: 1.6),
         ),
+        contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12), // Añadido para dar más altura
       ),
       isExpanded: true,
       items: items,
       onChanged: onChanged,
+    );
+  }
+
+  Widget _buildResponsiveDropdown<T>({
+    required BoxConstraints constraints,
+    required String label,
+    required IconData icon,
+    required T? value,
+    required List<DropdownMenuItem<T>> items,
+    required void Function(T?) onChanged,
+  }) {
+    // En pantallas muy angostas, usa el ancho completo.
+    // En pantallas más anchas, usa la mitad del ancho menos el espaciado.
+    final isNarrow = constraints.maxWidth < 400;
+    final itemWidth = isNarrow ? constraints.maxWidth : (constraints.maxWidth / 2) - 8;
+
+    return SizedBox(
+      width: itemWidth,
+      child: _buildDropdown(
+        label: label,
+        icon: icon,
+        value: value,
+        items: items,
+        onChanged: onChanged,
+      ),
     );
   }
 
@@ -1153,13 +1453,18 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
     return Card(
       elevation: 2,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        padding: const EdgeInsets.all(16.0),
+        child: Wrap(
+          spacing: 16.0, // Espacio horizontal
+          runSpacing: 12.0, // Espacio vertical
+          alignment: WrapAlignment.center,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
+            // --- Filtro de Fecha ---
             Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.calendar_today, color: Colors.grey),
+                const Icon(Icons.calendar_today, color: Colors.grey, size: 20),
                 const SizedBox(width: 8),
                 Text(
                   "${_fechaFiltro.day}/${_fechaFiltro.month}/${_fechaFiltro.year}",
@@ -1183,6 +1488,31 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
                 ),
               ],
             ),
+
+            // --- Filtro de Almacén ---
+            SizedBox(
+              width: 220, // Ancho fijo para el dropdown
+              child: DropdownButtonFormField<int>(
+                value: _selectedAlmacenFiltroId,
+                decoration: _inputDeco(label: 'Filtrar Almacén', icon: Icons.store_mall_directory_outlined).copyWith(
+                  suffixIcon: _selectedAlmacenFiltroId != null
+                    ? InkWell(
+                        child: const Icon(Icons.clear, color: Colors.grey),
+                        onTap: () {
+                          setState(() {
+                            _selectedAlmacenFiltroId = null;
+                          });
+                        },
+                      )
+                    : null,
+                ),
+                items: _almacenes.map((a) => DropdownMenuItem<int>(value: a.id, child: Text(a.nombre))).toList(),
+                onChanged: (v) => setState(() => _selectedAlmacenFiltroId = v),
+                isExpanded: true,
+              ),
+            ),
+
+            // --- Botón de Búsqueda ---
             ElevatedButton.icon(
               icon: const Icon(Icons.search, size: 18),
               label: const Text('BUSCAR'),
@@ -1190,12 +1520,121 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF1E3A8A),
                 foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
               ),
             ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _iniciarEdicion(EmbarqueConsulta embarque) async {
+    // 1. Mostrar un loader y limpiar el formulario actual
+    setState(() {
+      _isLoading = true;
+      _limpiarFormulario(); // Limpia cualquier estado anterior
+    });
+
+    try {
+      // 2. Obtener los detalles (productos) del embarque
+      final url = Uri.parse('${ApiConfig.baseUrl}api_embarque_detalle.php?idfolioembarque=${embarque.idfolioembarque}');
+      final response = await http.get(url);
+      if (!mounted) return;
+
+      final decoded = json.decode(response.body);
+      if (response.statusCode != 200 || decoded['success'] != true) {
+        throw Exception(decoded['error'] ?? 'Error al cargar los productos del embarque.');
+      }
+      final List<dynamic> detallesData = decoded['data'];
+
+      // 3. Poblar el estado del formulario con los datos del embarque
+      setState(() {
+        _editingEmbarqueId = embarque.idfolioembarque;
+
+        // Poblar cabecera
+        _selectedAlmacenId = embarque.idalmacen;
+        _selectedAlmacenistaId = null; // El almacenista no viene en EmbarqueConsulta, se deja en null
+        _selectedClienteId = embarque.idcliente;
+        _selectedUnidadId = null; // La unidad es por producto, no de cabecera
+
+        // Poblar la tabla de productos (filas)
+        for (var detalle in detallesData) {
+          // --- FIX: Usar parseo seguro en lugar de casteo directo ---
+          final cantidad = num.tryParse(detalle['cantidad'].toString()) ?? 0;
+          final precio = num.tryParse(detalle['preciounitario'].toString()) ?? 0;
+
+          filas.add({
+            'cod': _nextCodigo(),
+            'cantidad': cantidad.toInt(),
+            'unidad': _unidades.firstWhere((u) => u.id == detalle['idunidad'], orElse: () => Unidad(id: 0, nombre: 'N/A')).nombre,
+            'producto': _productos.firstWhere((p) => p.id == detalle['idproducto'], orElse: () => Producto(id: 0, nombre: 'N/A')).nombre,
+            'precio_controller': TextEditingController(text: precio.toStringAsFixed(2)),
+            'idproducto': detalle['idproducto'],
+            'idunidad': detalle['idunidad'],
+            'idestatus': detalle['idestatus'],
+          });
+        }
+
+        // 4. Cambiar a la pestaña de CREAR
+        _tabController.animateTo(0);
+        _isLoading = false;
+      });
+
+      _snack('Editando Embarque #${embarque.idfolioembarque}. Haz tus cambios y guarda.', color: Colors.blue);
+
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+        _snack('❌ Error al iniciar edición: $e', color: Colors.red);
+      }
+    }
+  }
+
+  Future<void> _cancelarEmbarque(int idfolioembarque) async {
+    final bool? confirmar = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirmar Cancelación'),
+        content: Text('¿Estás seguro de que deseas cancelar el embarque #$idfolioembarque? Esta acción no se puede deshacer.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('NO')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('SÍ, CANCELAR', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar != true) return;
+
+    setState(() => _isConsultando = true);
+
+    try {
+      final url = Uri.parse('${ApiConfig.baseUrl}api_cancelar_embarque.php');
+      final response = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json; charset=UTF-8'},
+        body: jsonEncode({'idfolioembarque': idfolioembarque}),
+      );
+
+      if (mounted) {
+        final decoded = json.decode(response.body);
+        if (response.statusCode == 200 && decoded['success'] == true) {
+          _snack('✅ Embarque #$idfolioembarque cancelado.', color: Colors.orange);
+          _consultarEmbarques(); // Refrescar la lista
+        } else {
+          throw Exception(decoded['error'] ?? 'Error desconocido al cancelar.');
+        }
+      }
+    } catch (e) {
+      if (mounted) _snack('❌ Error: $e', color: Colors.red);
+    } finally {
+      // El refresco ya quita el estado de carga, así que no es necesario aquí.
+    }
   }
 
   Widget _buildTablaResultados() {
@@ -1205,6 +1644,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: DataTable(
+          showCheckboxColumn: false, // Opcional: para que no parezca seleccionable si no lo es
           columns: const [
             DataColumn(label: Text('Folio')),
             DataColumn(label: Text('Fecha')),
@@ -1216,6 +1656,11 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
           ],
           rows: _embarquesConsultados.map((embarque) {
             return DataRow(
+              onSelectChanged: (isSelected) {
+                if (isSelected ?? false) {
+                  _mostrarDialogoDetalles(embarque);
+                }
+              },
               cells: [
                 DataCell(Text(embarque.idfolioembarque.toString())),
                 DataCell(Text(embarque.regtimestamp.split(' ').first)), // Mostrar solo la fecha
@@ -1230,9 +1675,9 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
                 ),
                 DataCell(Row(
                   children: [
-                    IconButton(icon: const Icon(Icons.edit_outlined), color: Colors.blue, onPressed: () { /* TODO: Lógica de Editar */ }),
-                    IconButton(icon: const Icon(Icons.delete_outline), color: Colors.red, onPressed: () { /* TODO: Lógica de Cancelar */ }),
-                    IconButton(icon: const Icon(Icons.print_outlined), color: Colors.grey, onPressed: () { /* TODO: Lógica de Imprimir */ }),
+                    IconButton(icon: const Icon(Icons.receipt_long_outlined), tooltip: 'Generar Nota', color: embarque.esActivo ? Colors.green : Colors.grey, onPressed: embarque.esActivo ? () => _generarNota(embarque) : null ),
+                    IconButton(icon: const Icon(Icons.edit_outlined), tooltip: 'Editar Embarque', color: embarque.esActivo ? Colors.blue : Colors.grey, onPressed: embarque.esActivo ? () => _iniciarEdicion(embarque) : null ),
+                    IconButton(icon: const Icon(Icons.delete_outline), tooltip: 'Cancelar Embarque', color: embarque.esActivo ? Colors.red : Colors.grey, onPressed: embarque.esActivo ? () => _cancelarEmbarque(embarque.idfolioembarque) : null ),
                   ],
                 )),
               ],

@@ -3,35 +3,81 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
+header('Content-Type: application/json');
 require_once __DIR__ . '/conexion.php';
 
 if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     try {
-        $fecha = $_GET['fecha'] ?? date('Y-m-d');
+        // Verificar si se proporciona un idcliente
+        if (isset($_GET['idcliente'])) {
+            // --- Lógica para obtener notas de un cliente específico ---
+            $idcliente = $_GET['idcliente'];
 
-        if (!preg_match("/^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[1-2][0-9]|3[0-1])$/", $fecha)) {
-            throw new Exception("Formato de fecha inválido. Use YYYY-MM-DD.", 400);
-        }
+            if (!filter_var($idcliente, FILTER_VALIDATE_INT)) {
+                throw new Exception("ID de cliente inválido.", 400);
+            }
 
-        $sql = "SELECT n.idnota, n.total, n.saldo, n.regtimestamp, c.nombrecliente AS nombre_cliente 
-                FROM notas AS n
-                JOIN clientes AS c ON n.idcliente = c.idcliente
-                WHERE DATE(n.regtimestamp) = ?";
+            // Se buscan notas con saldo pendiente para ese cliente
+            $sql = "SELECT 
+                        n.idnota, 
+                        n.total, 
+                        n.saldo, 
+                        n.regtimestamp, 
+                        n.idalmacen, -- ID del almacén de salida
+                        c.nombrecliente AS nombre_cliente,
+                        u.nombre AS nombre_vendedor,
+                        alm_salida.nombrealmacen AS nombre_almacen_salida,
+                        alm_origen.nombrealmacen AS nombre_almacen_origen,
+                        COALESCE(pagos_sum.total_pagado, 0) AS monto_pagado_acumulado
+                    FROM notas AS n
+                    JOIN clientes AS c ON n.idcliente = c.idcliente
+                    JOIN usuarios AS u ON n.idusuario = u.idusuario
+                    JOIN almacenes AS alm_salida ON n.idalmacen = alm_salida.idalmacen
+                    LEFT JOIN embarque AS e ON n.idembarque = e.idfolioembarque
+                    LEFT JOIN almacenes AS alm_origen ON e.idalmacen = alm_origen.idalmacen
+                    LEFT JOIN (
+                        SELECT idnota, SUM(totalpago) AS total_pagado
+                        FROM pagos_m
+                        WHERE estado = 1
+                        GROUP BY idnota
+                    ) AS pagos_sum ON n.idnota = pagos_sum.idnota
+                    WHERE n.idcliente = ? AND n.saldo > 0
+                    ORDER BY n.regtimestamp DESC";
 
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param("s", $fecha);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $notas = [];
-        while ($row = $result->fetch_assoc()) {
-            $notas[] = $row;
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("i", $idcliente);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $data = [];
+            while ($row = $result->fetch_assoc()) {
+                $data[] = $row;
+            }
+            $response = ["type" => "notas", "data" => $data];
+
+        } else {
+            // --- Lógica para obtener la lista de clientes con notas pendientes ---
+            $sql = "SELECT DISTINCT c.idcliente, c.nombrecliente 
+                    FROM clientes AS c
+                    JOIN notas AS n ON c.idcliente = n.idcliente
+                    WHERE n.saldo > 0
+                    ORDER BY c.nombrecliente ASC";
+            
+            $result = $conn->query($sql);
+            if ($result === false) {
+                throw new Exception("Error al consultar la lista de clientes: " . $conn->error);
+            }
+            
+            $data = [];
+            while ($row = $result->fetch_assoc()) {
+                $data[] = $row;
+            }
+            $response = ["type" => "clientes", "data" => $data];
         }
         
         http_response_code(200);
-        echo json_encode(["success" => true, "data" => $notas]);
+        echo json_encode(["success" => true, "response" => $response]);
 
     } catch (Exception $e) {
-        // Si algo falla, capturamos la excepción y enviamos un error JSON
         $errorCode = $e->getCode() == 400 ? 400 : 500;
         http_response_code($errorCode);
         echo json_encode(["success" => false, "error" => $e->getMessage()]);

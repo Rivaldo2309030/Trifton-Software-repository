@@ -92,7 +92,10 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                         child: CircleAvatar(
                           radius: 64,
                           backgroundColor: Colors.white,
-                          child: _brandIcon(size: 64),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12.0), // Ajusta el padding
+                            child: Image.asset('assets/img/logo_triton_principal.png'),
+                          ),
                         ),
                       ),
                     ),
@@ -167,17 +170,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
   }
 }
 
-Widget _brandIcon({double size = 48}) {
-  return Image.asset(
-    'assets/icon/triton_t.png',
-    width: size,
-    height: size,
-    fit: BoxFit.contain,
-    filterQuality: FilterQuality.high,
-    errorBuilder: (_, __, ___) =>
-        const Icon(Icons.local_shipping_rounded, color: kBrandDark, size: 48),
-  );
-}
+
 
 Widget _bubble(double size, double opacity) {
   return Container(
