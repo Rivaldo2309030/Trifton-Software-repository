@@ -10,6 +10,7 @@ import 'package:distribuidora/screens/print_preview_screen.dart';
 import 'package:connectivity_plus/connectivity_plus.dart'; // Import for connectivity_plus
 import 'package:distribuidora/models/offline_note_model.dart';
 import 'package:distribuidora/services/database_helper.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 
 // --- Modelo para los productos dentro del detalle de la nota (ahora desde embarque_detalle) ---
@@ -73,6 +74,39 @@ class Estatus {
   }
 }
 
+// Modelo para los pagos
+class Pago {
+  final int idpago;
+  final double monto;
+  final String tipoPago;
+  final String regtimestamp;
+
+  Pago({
+    required this.idpago,
+    required this.monto,
+    required this.tipoPago,
+    required this.regtimestamp,
+  });
+
+  factory Pago.fromJson(Map<String, dynamic> json) {
+    return Pago(
+      idpago: int.tryParse(json['idpago'].toString()) ?? 0,
+      monto: double.tryParse(json['monto'].toString()) ?? 0.0,
+      tipoPago: json['tipo_pago'] ?? 'N/A',
+      regtimestamp: json['regtimestamp'] ?? '',
+    );
+  }
+
+  factory Pago.fromDbMap(Map<String, dynamic> map) {
+    return Pago(
+      idpago: map['idpago'],
+      monto: map['monto'],
+      tipoPago: map['tipo_pago'],
+      regtimestamp: map['regtimestamp'],
+    );
+  }
+}
+
 class NotaDetailScreen extends StatefulWidget {
   final Nota nota;
 
@@ -101,6 +135,9 @@ class _NotaDetailScreenState extends State<NotaDetailScreen> {
   // Estado para la lista de Estatus
   List<Estatus> _estatusList = [];
 
+  // Estado para el historial de pagos
+  List<Pago> _pagos = [];
+
   // Formulario de Pago
   final _formKey = GlobalKey<FormState>();
   final _montoController = TextEditingController();
@@ -117,6 +154,9 @@ class _NotaDetailScreenState extends State<NotaDetailScreen> {
     _saldoActual = widget.nota.saldo;
     _selectedAlmacenId = widget.nota.idalmacen;
     
+    // Set initial value for payment amount controller
+    _montoController.text = _saldoActual.toStringAsFixed(2);
+
     // _loadLastPaymentInfo(); // Eliminado
     _fetchInitialData();
   }
@@ -124,16 +164,32 @@ class _NotaDetailScreenState extends State<NotaDetailScreen> {
   // La función _loadLastPaymentInfo ha sido eliminada.
 
   Future<void> _fetchInitialData() async {
-    setState(() { _isLoading = true; });
-    // Ejecutar todas las llamadas de red concurrentemente
+    if(mounted) setState(() { _isLoading = true; });
+    
+    // Prioritize local data
+    await _loadDetallesFromOffline();
+    await _loadPagos();
+
+    // Fetch network data in background
+    _fetchNetworkData();
+
+    if (mounted) {
+      setState(() { _isLoading = false; });
+    }
+  }
+
+  // Fetches data that requires network but doesn't block the UI
+  Future<void> _fetchNetworkData() async {
+    var connectivityResult = await (Connectivity().checkConnectivity());
+    if (connectivityResult.contains(ConnectivityResult.none)) {
+      return; // No network, no need to fetch
+    }
+    // We can still fetch catalogs and try to sync details/payments
     await Future.wait([
       _fetchDetallesNota(),
       _fetchAlmacenes(),
       _fetchEstatusList(),
     ]);
-    if (mounted) {
-      setState(() { _isLoading = false; });
-    }
   }
 
   @override
@@ -144,7 +200,7 @@ class _NotaDetailScreenState extends State<NotaDetailScreen> {
 
   Future<void> _fetchEstatusList() async {
     var connectivityResult = await (Connectivity().checkConnectivity());
-    if (connectivityResult == ConnectivityResult.none) {
+    if (connectivityResult.contains(ConnectivityResult.none)) {
 
     }
 
@@ -174,7 +230,7 @@ class _NotaDetailScreenState extends State<NotaDetailScreen> {
 
   Future<void> _fetchAlmacenes() async {
     var connectivityResult = await (Connectivity().checkConnectivity());
-    if (connectivityResult == ConnectivityResult.none) {
+    if (connectivityResult.contains(ConnectivityResult.none)) {
       // _showConnectivitySnackBar('No hay conexión a internet. No se pudo cargar la lista de almacenes.');
       return;
     }
@@ -208,7 +264,7 @@ class _NotaDetailScreenState extends State<NotaDetailScreen> {
     });
 
     var connectivityResult = await (Connectivity().checkConnectivity());
-    if (connectivityResult == ConnectivityResult.none) {
+    if (connectivityResult.contains(ConnectivityResult.none)) {
       // _showConnectivitySnackBar('No hay conexión a internet. No se pudo actualizar el almacén.');
       if (mounted) {
         setState(() {
@@ -240,6 +296,7 @@ class _NotaDetailScreenState extends State<NotaDetailScreen> {
             final nombreNuevoAlmacen = _almacenes.firstWhere((a) => a.id == nuevoAlmacenId, orElse: () => Almacen(id: 0, nombre: 'N/A')).nombre;
             _notaActual = Nota(
               idnota: _notaActual.idnota,
+              idcliente: _notaActual.idcliente, // <-- CORREGIDO
               total: _notaActual.total,
               saldo: _notaActual.saldo,
               regtimestamp: _notaActual.regtimestamp,
@@ -278,7 +335,7 @@ class _NotaDetailScreenState extends State<NotaDetailScreen> {
 
   Future<void> _fetchDetallesNota() async {
     var connectivityResult = await (Connectivity().checkConnectivity());
-    if (connectivityResult == ConnectivityResult.none) {
+    if (connectivityResult.contains(ConnectivityResult.none)) {
       // _showConnectivitySnackBar('No hay conexión a internet. Cargando datos locales si existen.');
       await _loadDetallesFromOffline();
       return;
@@ -343,12 +400,21 @@ class _NotaDetailScreenState extends State<NotaDetailScreen> {
           final List<dynamic> pagosData = decoded['data'];
           final dbHelper = DatabaseHelper.instance;
           await dbHelper.insertPagosOffline(pagosData.cast<Map<String, dynamic>>());
-          print('Pagos para la nota #$idnota sincronizados localmente.');
+          await _loadPagos(); // Refresh local payments after sync
         }
       }
     } catch (e) {
       // Falla silenciosamente. Si no se pueden sincronizar los pagos, no es un error crítico.
-      print('Error al sincronizar pagos para la nota #$idnota: $e');
+    }
+  }
+
+  Future<void> _loadPagos() async {
+    final dbHelper = DatabaseHelper.instance;
+    final List<Map<String, dynamic>> pagosMaps = await dbHelper.getPagosForNota(widget.nota.idnota);
+    if (mounted) {
+      setState(() {
+        _pagos = pagosMaps.map((map) => Pago.fromDbMap(map)).toList();
+      });
     }
   }
 
@@ -396,77 +462,102 @@ class _NotaDetailScreenState extends State<NotaDetailScreen> {
 
   Future<void> _registrarPago() async {
     if (!_formKey.currentState!.validate()) return;
-
     setState(() { _isPaying = true; });
 
+    final montoPagado = double.parse(_montoController.text);
     var connectivityResult = await (Connectivity().checkConnectivity());
-    if (connectivityResult == ConnectivityResult.none) {
-      // _showConnectivitySnackBar('No hay conexión a internet. No se pudo registrar el pago.');
-      if (mounted) setState(() { _isPaying = false; });
-      return;
+    final isOffline = connectivityResult.contains(ConnectivityResult.none);
+
+    if (isOffline) {
+      await _registrarPagoOffline(montoPagado);
+    } else {
+      await _registrarPagoOnline(montoPagado);
     }
 
-    try {
-      final montoPagado = double.parse(_montoController.text);
-      final payload = {
-        'idnota': widget.nota.idnota,
-        'monto': montoPagado,
-        'tipopago': _tipoPago,
-      };
+    if (mounted) setState(() { _isPaying = false; });
+  }
 
+  Future<void> _registrarPagoOnline(double montoPagado) async {
+    try {
+      final payload = { 'idnota': widget.nota.idnota, 'monto': montoPagado, 'tipopago': _tipoPago };
       final url = Uri.parse('${ApiConfig.baseUrl}api_registrar_pago.php');
-      final response = await http.post(
-        url,
-        headers: {'Content-Type': 'application/json; charset=UTF-8'},
-        body: jsonEncode(payload),
-      ).timeout(const Duration(seconds: 15));
+      final response = await http.post(url, headers: {'Content-Type': 'application/json; charset=UTF-8'}, body: jsonEncode(payload)).timeout(const Duration(seconds: 15));
 
       if (mounted) {
         final decoded = json.decode(response.body);
         if (response.statusCode == 200 && decoded['success'] == true) {
           final nuevoSaldoRecibido = (decoded['nuevo_saldo'] as num).toDouble();
+          final nuevoMontoPagadoAcumulado = _notaActual.montoPagadoAcumulado + montoPagado;
+
+          // Actualizar DB local para consistencia
+          final dbHelper = DatabaseHelper.instance;
+          await dbHelper.updateNotaSaldo(widget.nota.idnota, nuevoSaldoRecibido, nuevoMontoPagadoAcumulado);
+
           setState(() {
             _saldoActual = nuevoSaldoRecibido;
             _hasDataChanged = true;
-            
-            // Actualizamos el monto acumulado en el objeto de la nota para habilitar el botón de imprimir
-            _notaActual = Nota(
-              idnota: _notaActual.idnota,
-              total: _notaActual.total,
-              saldo: nuevoSaldoRecibido,
-              regtimestamp: _notaActual.regtimestamp,
-              nombreCliente: _notaActual.nombreCliente,
-              idalmacen: _notaActual.idalmacen,
-              nombreAlmacenSalida: _notaActual.nombreAlmacenSalida,
-              nombreAlmacenOrigen: _notaActual.nombreAlmacenOrigen,
-              montoPagadoAcumulado: _notaActual.montoPagadoAcumulado + montoPagado,
-            );
+            _montoController.text = _saldoActual.toStringAsFixed(2);
+            _notaActual = Nota(idnota: _notaActual.idnota, idcliente: _notaActual.idcliente, total: _notaActual.total, saldo: nuevoSaldoRecibido, regtimestamp: _notaActual.regtimestamp, nombreCliente: _notaActual.nombreCliente, idalmacen: _notaActual.idalmacen, nombreAlmacenSalida: _notaActual.nombreAlmacenSalida, nombreAlmacenOrigen: _notaActual.nombreAlmacenOrigen, montoPagadoAcumulado: nuevoMontoPagadoAcumulado, nombreVendedor: _notaActual.nombreVendedor);
           });
 
-          // La información del último pago ya no se guarda en SharedPreferences.
-
           _montoController.clear();
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('✅ Pago registrado. Nuevo saldo: $nuevoSaldoRecibido'), backgroundColor: Colors.green),
-          );
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('✅ Pago registrado. Nuevo saldo: $nuevoSaldoRecibido'), backgroundColor: Colors.green));
+          await _syncPagosForNota(widget.nota.idnota); // Refrescar historial de pagos
         } else {
           throw Exception(decoded['error'] ?? 'Error desconocido al registrar el pago');
         }
       }
-    } on SocketException {
-      if (mounted) { 
-        // _showConnectivitySnackBar('Error de conexión al registrar el pago.');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('❌ Error al registrar el pago: $e'), backgroundColor: Colors.red));
+      }
+    }
+  }
+
+  Future<void> _registrarPagoOffline(double montoPagado) async {
+    try {
+      final dbHelper = DatabaseHelper.instance;
+      final prefs = await SharedPreferences.getInstance();
+      final idUsuario = prefs.getInt('idusuario');
+
+      if (idUsuario == null) {
+        throw Exception('No se pudo obtener el ID de usuario para el registro offline.');
+      }
+
+      final pagoData = {
+        'idnota': widget.nota.idnota,
+        'monto': montoPagado,
+        'tipo_pago': _tipoPago,
+        'regtimestamp': DateTime.now().toIso8601String(),
+        'id_usuario': idUsuario,
+        'synced': 0
+      };
+
+      await dbHelper.insertPagoParaSincronizar(pagoData);
+
+      final nuevoSaldo = _saldoActual - montoPagado;
+      final nuevoMontoPagadoAcumulado = _notaActual.montoPagadoAcumulado + montoPagado;
+      await dbHelper.updateNotaSaldo(widget.nota.idnota, nuevoSaldo, nuevoMontoPagadoAcumulado);
+
+      if (mounted) {
+        setState(() {
+          _saldoActual = nuevoSaldo;
+          _hasDataChanged = true;
+          _montoController.text = _saldoActual.toStringAsFixed(2);
+          _notaActual = Nota(idnota: _notaActual.idnota, idcliente: _notaActual.idcliente, total: _notaActual.total, saldo: nuevoSaldo, regtimestamp: _notaActual.regtimestamp, nombreCliente: _notaActual.nombreCliente, idalmacen: _notaActual.idalmacen, nombreAlmacenSalida: _notaActual.nombreAlmacenSalida, nombreAlmacenOrigen: _notaActual.nombreAlmacenOrigen, montoPagadoAcumulado: nuevoMontoPagadoAcumulado, nombreVendedor: _notaActual.nombreVendedor);
+        });
+        _montoController.clear();
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ Pago guardado localmente. Sincronizar más tarde.'), backgroundColor: Colors.blue));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('❌ Error al registrar el pago: $e'), backgroundColor: Colors.red),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('❌ Error al guardar pago local: $e'), backgroundColor: Colors.red));
       }
-    } finally {
-      if (mounted) setState(() { _isPaying = false; });
     }
   }
+
+  
+
 
 
 
@@ -495,45 +586,45 @@ class _NotaDetailScreenState extends State<NotaDetailScreen> {
       final url = Uri.parse('${ApiConfig.baseUrl}api_ultimo_pago.php?id_nota=${_notaActual.idnota}');
       final response = await http.get(url).timeout(const Duration(seconds: 10));
 
-      if (mounted) {
-        Navigator.pop(context); // Cerrar el diálogo de carga
-        final decoded = json.decode(response.body);
+      if (!mounted) return; // mounted check
+      Navigator.pop(context); // Cerrar el diálogo de carga
+      final decoded = json.decode(response.body);
 
-        if (response.statusCode == 200 && decoded['success'] == true) {
-          double montoPagado = 0;
-          String formaDePago = '';
-          double saldoAnterior = 0;
+      if (response.statusCode == 200 && decoded['success'] == true) {
+        double montoPagado = 0;
+        String formaDePago = '';
+        double saldoAnterior = 0;
 
-          final paymentData = decoded['data'];
-          if (paymentData != null) {
-            montoPagado = double.tryParse(paymentData['monto'].toString()) ?? 0.0;
-            formaDePago = paymentData['tipo_pago'] ?? '';
-            saldoAnterior = _notaActual.saldo + montoPagado;
-          }
-
-          _navigateToPrintPreview(montoPagado: montoPagado, formaDePago: formaDePago, saldoAnterior: saldoAnterior);
-        } else {
-          throw Exception(decoded['message'] ?? 'No se pudo obtener la información del último pago.');
+        final paymentData = decoded['data'];
+        if (paymentData != null) {
+          montoPagado = double.tryParse(paymentData['monto'].toString()) ?? 0.0;
+          formaDePago = paymentData['tipo_pago'] ?? '';
+          saldoAnterior = _notaActual.saldo + montoPagado;
         }
+
+        _navigateToPrintPreview(montoPagado: montoPagado, formaDePago: formaDePago, saldoAnterior: saldoAnterior);
+      } else {
+        throw Exception(decoded['message'] ?? 'No se pudo obtener la información del último pago.');
       }
+
     } on SocketException {
-        if (mounted) {
-            Navigator.pop(context); // Cerrar diálogo de carga
-            _printFromOffline(); // <-- FALLBACK A MODO OFFLINE
-        }
+        if (!mounted) return;
+        Navigator.pop(context); // Cerrar diálogo de carga
+        _printFromOffline(); // <-- FALLBACK A MODO OFFLINE
     } catch (e) {
-      if (mounted) {
-        Navigator.pop(context); // Cerrar el diálogo de carga en caso de error
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error para imprimir: $e'), backgroundColor: Colors.red),
-        );
-      }
+      if (!mounted) return;
+      Navigator.pop(context); // Cerrar el diálogo de carga en caso de error
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error para imprimir: $e'), backgroundColor: Colors.red),
+      );
     }
   }
 
   Future<void> _printFromOffline() async {
     final dbHelper = DatabaseHelper.instance;
     final localPago = await dbHelper.getLatestPagoForNota(_notaActual.idnota);
+
+    if (!mounted) return;
 
     if (localPago != null) {
       final montoPagado = localPago['monto'] as double;
@@ -556,6 +647,27 @@ class _NotaDetailScreenState extends State<NotaDetailScreen> {
       montoPagado: montoPagado,
       formaDePago: formaDePago,
       saldoAnterior: saldoAnterior,
+      isDeliveryNote: false, // This is the payment receipt
+    );
+
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => PrintPreviewScreen(args: args),
+      ),
+    );
+  }
+
+  void _navigateToPrintPreviewNotaSurtido() {
+    final args = PrintPreviewArgs(
+      nota: _notaActual,
+      detalles: _detalles,
+      nombreVendedor: _nombreVendedor,
+      montoPagado: 0, // No payment for delivery note
+      formaDePago: '', // No payment for delivery note
+      saldoAnterior: 0, // No payment for delivery note
+      isDeliveryNote: true, // New parameter to indicate delivery note
     );
 
     Navigator.push(
@@ -568,10 +680,11 @@ class _NotaDetailScreenState extends State<NotaDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: () async {
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
         Navigator.pop(context, _hasDataChanged);
-        return false;
       },
       child: Scaffold(
         appBar: AppBar(
@@ -584,13 +697,20 @@ class _NotaDetailScreenState extends State<NotaDetailScreen> {
             tooltip: 'Regresar',
           ),
           actions: [
+            // Botón para "Nota de Surtido" (siempre activo)
             IconButton(
-              icon: const Icon(Icons.print_outlined),
+              icon: const Icon(Icons.local_shipping_outlined), // Icono para nota de surtido
+              onPressed: !_isLoading ? _navigateToPrintPreviewNotaSurtido : null,
+              tooltip: 'Imprimir Nota de Surtido',
+            ),
+            // Botón para "Recibo de Pago" (condicionalmente activo)
+            IconButton(
+              icon: const Icon(Icons.receipt_long), // Icono para recibo de pago
               onPressed: (_notaActual.montoPagadoAcumulado > 0 && !_isLoading) ? _handlePrint : null,
               tooltip: _isLoading 
                   ? 'Cargando datos...' 
                   : (_notaActual.montoPagadoAcumulado > 0 
-                      ? 'Imprimir Tickets' 
+                      ? 'Imprimir Recibo de Pago' 
                       : 'No se han registrado pagos para esta nota'),
             ),
           ],
@@ -608,6 +728,7 @@ class _NotaDetailScreenState extends State<NotaDetailScreen> {
                   ),
                   Expanded(child: _buildDetailsList()),
                   if (_saldoActual > 0) _buildPaymentForm(),
+                  _buildPaymentHistory(), // Mostrar historial de pagos
                 ],
               ),
       ),
@@ -629,7 +750,7 @@ class _NotaDetailScreenState extends State<NotaDetailScreen> {
               const SizedBox(height: 12),
               // ---- INICIO DEL COMBO DE ALMACÉN ----
               DropdownButtonFormField<int>(
-                value: _almacenes.any((almacen) => almacen.id == _selectedAlmacenId) ? _selectedAlmacenId : null,
+                initialValue: _almacenes.any((almacen) => almacen.id == _selectedAlmacenId) ? _selectedAlmacenId : null,
                 items: _almacenes.map((almacen) {
                   return DropdownMenuItem<int>(
                     value: almacen.id,
@@ -679,7 +800,7 @@ class _NotaDetailScreenState extends State<NotaDetailScreen> {
     // Para evitar múltiples llamadas, podrías añadir un booleano de estado aquí si es necesario
 
     var connectivityResult = await (Connectivity().checkConnectivity());
-    if (connectivityResult == ConnectivityResult.none) {
+    if (connectivityResult.contains(ConnectivityResult.none)) {
       // _showConnectivitySnackBar('No hay conexión a internet. No se pudo cambiar el estatus del producto.');
       return;
     }
@@ -729,7 +850,7 @@ class _NotaDetailScreenState extends State<NotaDetailScreen> {
 
   Future<void> _recalcularNota() async {
     var connectivityResult = await (Connectivity().checkConnectivity());
-    if (connectivityResult == ConnectivityResult.none) {
+    if (connectivityResult.contains(ConnectivityResult.none)) {
       // _showConnectivitySnackBar('No hay conexión a internet. No se pudo recalcular la nota.');
       return;
     }
@@ -750,6 +871,7 @@ class _NotaDetailScreenState extends State<NotaDetailScreen> {
             // Actualizar el estado local con los nuevos valores devueltos por la API
             _notaActual = Nota(
               idnota: _notaActual.idnota,
+              idcliente: _notaActual.idcliente, // <-- CORREGIDO
               total: (decoded['nuevo_total'] as num).toDouble(),
               saldo: (decoded['nuevo_saldo'] as num).toDouble(),
               regtimestamp: _notaActual.regtimestamp,
@@ -872,7 +994,7 @@ class _NotaDetailScreenState extends State<NotaDetailScreen> {
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
-                value: _tipoPago,
+                initialValue: _tipoPago,
                 decoration: const InputDecoration(
                   labelText: 'Tipo de Pago',
                   border: OutlineInputBorder(),
@@ -905,6 +1027,40 @@ class _NotaDetailScreenState extends State<NotaDetailScreen> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPaymentHistory() {
+    final NumberFormat currencyFormat = NumberFormat.currency(locale: 'es_MX', symbol: '\$');
+    final DateFormat dateFormat = DateFormat('dd/MM/yyyy HH:mm');
+
+    if (_pagos.isEmpty) {
+      return const SizedBox.shrink(); // No mostrar si no hay pagos
+    }
+
+    return Card(
+      margin: const EdgeInsets.all(8),
+      elevation: 5,
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text('Historial de Pagos', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            ..._pagos.map((pago) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(dateFormat.format(DateTime.parse(pago.regtimestamp)), style: const TextStyle(fontSize: 14, color: Colors.grey)),
+                  Text('${pago.tipoPago}: ${currencyFormat.format(pago.monto)}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+                ],
+              ),
+            )),
+          ],
         ),
       ),
     );

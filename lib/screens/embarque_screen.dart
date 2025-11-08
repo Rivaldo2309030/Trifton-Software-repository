@@ -204,6 +204,7 @@ class EmbarqueConsulta {
   final int idcliente;
   final int idalmacen;
   final int idusuario;
+  final int idalmacenista; // Nuevo: ID del almacenista
 
   EmbarqueConsulta({
     required this.idfolioembarque,
@@ -215,6 +216,7 @@ class EmbarqueConsulta {
     required this.idcliente,
     required this.idalmacen,
     required this.idusuario,
+    required this.idalmacenista, // Nuevo
   });
 
   factory EmbarqueConsulta.fromJson(Map<String, dynamic> json) {
@@ -229,6 +231,7 @@ class EmbarqueConsulta {
       idcliente: int.tryParse(json['idcliente'].toString()) ?? 0,
       idalmacen: int.tryParse(json['idalmacen'].toString()) ?? 0,
       idusuario: int.tryParse(json['idusuario'].toString()) ?? 0,
+      idalmacenista: int.tryParse(json['idalmacenista'].toString()) ?? 0, // Nuevo
     );
   }
 }
@@ -524,8 +527,13 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
 
   void _agregarFila() {
     // Validaciones de encabezado actualizadas
-    if (_selectedAlmacenId == null || _selectedAlmacenistaId == null || _selectedUnidadId == null || _selectedClienteId == null) {
+    if (_selectedAlmacenId == null || _selectedAlmacenistaId == null || _selectedClienteId == null) {
       _snack('Completa todos los campos del encabezado.', color: Colors.red);
+      return;
+    }
+
+    if (_selectedUnidadId == null) {
+      _snack('Selecciona una unidad para el producto.', color: Colors.red);
       return;
     }
     
@@ -1014,17 +1022,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
                                             items: _almacenistas.map((a) => DropdownMenuItem<int>(value: a.id, child: Text(a.nombre))).toList(),
                                             onChanged: (v) => setState(() => _selectedAlmacenistaId = v),
                                           ),
-                                          _buildResponsiveDropdown(
-                                            constraints: constraints,
-                                            label: 'Unidad',
-                                            icon: Icons.straighten,
-                                            value: _selectedUnidadId,
-                                            items: _unidades.map((u) => DropdownMenuItem<int>(value: u.id, child: Text(u.nombre))).toList(),
-                                            onChanged: (v) {
-                                              setState(() => _selectedUnidadId = v);
-                                              _fetchPrecio();
-                                            },
-                                          ),
+
                                           _buildResponsiveDropdown(
                                             constraints: constraints,
                                             label: 'Cliente',
@@ -1061,7 +1059,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
                                           children: [
                                             // Autocomplete de productos
                                             SizedBox(
-                                              width: isSmall ? double.infinity : c.maxWidth * 0.5,
+                                              width: isSmall ? double.infinity : c.maxWidth * 0.4,
                                               child: Autocomplete<Producto>(
                                                 key: _autocompleteKey,
                                                 displayStringForOption: (Producto option) => option.nombre,
@@ -1103,7 +1101,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
                                             ),
                                             // Campo de cantidad
                                             SizedBox(
-                                              width: isSmall ? double.infinity : c.maxWidth * 0.2,
+                                              width: isSmall ? (c.maxWidth / 2) - 8 : c.maxWidth * 0.15,
                                               child: TextField(
                                                 controller: cantidadCtrl,
                                                 keyboardType: TextInputType.number,
@@ -1113,9 +1111,23 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
                                                 ),
                                               ),
                                             ),
+                                            // Unidad Dropdown
+                                            SizedBox(
+                                              width: isSmall ? (c.maxWidth / 2) - 8 : c.maxWidth * 0.2,
+                                              child: _buildDropdown(
+                                                label: 'Unidad',
+                                                icon: Icons.straighten,
+                                                value: _selectedUnidadId,
+                                                items: _unidades.map((u) => DropdownMenuItem<int>(value: u.id, child: Text(u.nombre))).toList(),
+                                                onChanged: (v) {
+                                                  setState(() => _selectedUnidadId = v);
+                                                  _fetchPrecio();
+                                                },
+                                              ),
+                                            ),
                                             // Botón de agregar
                                             SizedBox(
-                                              width: isSmall ? double.infinity : c.maxWidth * 0.2,
+                                              width: isSmall ? double.infinity : c.maxWidth * 0.15,
                                               child: _primaryButton(
                                                 icon: Icons.add_circle_outline,
                                                 text: 'Agregar',
@@ -1554,7 +1566,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen> with SingleTickerProvid
 
         // Poblar cabecera
         _selectedAlmacenId = embarque.idalmacen;
-        _selectedAlmacenistaId = null; // El almacenista no viene en EmbarqueConsulta, se deja en null
+        _selectedAlmacenistaId = embarque.idalmacenista; // Ahora sí viene en EmbarqueConsulta
         _selectedClienteId = embarque.idcliente;
         _selectedUnidadId = null; // La unidad es por producto, no de cabecera
 

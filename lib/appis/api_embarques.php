@@ -1,20 +1,8 @@
 <?php
 header('Content-Type: application/json');
 
-// Configuración de la base de datos
-$servername = "srv571.hstgr.io";
-$username = "u203835291_serviceOrder";
-$password = "TritonSrv2025$%";
-$dbname = "u203835291_orders";
+require_once __DIR__ . '/conexion.php';
 
-// Crear conexión
-$conn = new mysqli($servername, $username, $password, $dbname);
-
-// Verificar conexión
-if ($conn->connect_error) {
-    http_response_code(500);
-    die(json_encode(['error' => 'Connection failed: ' . $conn->connect_error]));
-}
 
 // Solo aceptamos POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {

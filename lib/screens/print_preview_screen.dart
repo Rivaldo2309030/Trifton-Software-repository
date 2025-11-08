@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -36,6 +38,7 @@ class PrintPreviewArgs {
   final double montoPagado;
   final String formaDePago;
   final double saldoAnterior;
+  final bool isDeliveryNote; // Nuevo: indica si es una nota de surtido
 
   PrintPreviewArgs({
     required this.nota,
@@ -44,6 +47,7 @@ class PrintPreviewArgs {
     required this.montoPagado,
     required this.formaDePago,
     required this.saldoAnterior,
+    this.isDeliveryNote = false, // Valor por defecto
   });
 }
 
@@ -99,33 +103,146 @@ class _PrintPreviewScreenState extends State<PrintPreviewScreen> {
     return Empresa(); 
   }
 
-  Future<void> _printDocuments() async {
+  Future<void> _savePdfToDownloads() async {
     setState(() => _isPrinting = true);
 
-    final doc = pw.Document();
-    final empresa = await _empresaFuture;
+    try {
+      final doc = pw.Document();
+      final empresa = await _empresaFuture;
 
-    // Definir el formato de página para impresora térmica de 58mm
-    const pageFormat = PdfPageFormat(58 * PdfPageFormat.mm, double.infinity, marginAll: 2 * PdfPageFormat.mm);
+      const pageFormat = PdfPageFormat(58 * PdfPageFormat.mm, double.infinity, marginAll: 2 * PdfPageFormat.mm);
 
-    // Añadir 2 copias de la Nota de Venta
-    doc.addPage(pw.Page(pageFormat: pageFormat, build: (pw.Context context) => NotaVentaPdf(args: widget.args, empresa: empresa)));
-    doc.addPage(pw.Page(pageFormat: pageFormat, build: (pw.Context context) => NotaVentaPdf(args: widget.args, empresa: empresa)));
-    
-    // Añadir 1 copia del Recibo de Pago
-    doc.addPage(pw.Page(pageFormat: pageFormat, build: (pw.Context context) => ReciboPagoPdf(args: widget.args, empresa: empresa)));
+      if (widget.args.isDeliveryNote) {
+        doc.addPage(pw.Page(pageFormat: pageFormat, build: (pw.Context context) => NotaVentaPdf(args: widget.args, empresa: empresa)));
+      } else {
+        doc.addPage(pw.Page(pageFormat: pageFormat, build: (pw.Context context) => NotaVentaPdf(args: widget.args, empresa: empresa)));
+        doc.addPage(pw.Page(pageFormat: pageFormat, build: (pw.Context context) => NotaVentaPdf(args: widget.args, empresa: empresa)));
+        doc.addPage(pw.Page(pageFormat: pageFormat, build: (pw.Context context) => ReciboPagoPdf(args: widget.args, empresa: empresa)));
+      }
 
-    await Printing.layoutPdf(
-        onLayout: (PdfPageFormat format) async => doc.save());
+      // Sanitize the client name for the filename
+      final sanitizedClientName = widget.args.nota.nombreCliente.replaceAll(RegExp(r'[^a-zA-Z0-9 ._-]'), '').trim();
+      final String filename = '${widget.args.nota.idnota}-${sanitizedClientName}.pdf';
 
-    if (mounted) {
-      setState(() => _isPrinting = false);
-      Navigator.of(context).pop();
+      // Get the downloads directory
+      final Directory? downloadsDir = await getDownloadsDirectory();
+      if (downloadsDir == null) {
+        throw Exception("No se pudo encontrar el directorio de descargas.");
+      }
+      
+      final String path = '${downloadsDir.path}/$filename';
+
+      // Save the file
+      final file = File(path);
+      await file.writeAsBytes(await doc.save());
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('✅ Guardado en Descargas: $filename'), backgroundColor: Colors.green),
+        );
+        Navigator.of(context).pop();
+      }
+
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ Error al guardar el PDF: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isPrinting = false);
+      }
+    }
+  }
+
+  Future<void> _printDocument() async {
+    setState(() => _isPrinting = true);
+    try {
+      final doc = pw.Document();
+      final empresa = await _empresaFuture;
+      const pageFormat = PdfPageFormat(58 * PdfPageFormat.mm, double.infinity, marginAll: 2 * PdfPageFormat.mm);
+
+      if (widget.args.isDeliveryNote) {
+        doc.addPage(pw.Page(pageFormat: pageFormat, build: (pw.Context context) => NotaVentaPdf(args: widget.args, empresa: empresa)));
+      } else {
+        doc.addPage(pw.Page(pageFormat: pageFormat, build: (pw.Context context) => NotaVentaPdf(args: widget.args, empresa: empresa)));
+        doc.addPage(pw.Page(pageFormat: pageFormat, build: (pw.Context context) => NotaVentaPdf(args: widget.args, empresa: empresa)));
+        doc.addPage(pw.Page(pageFormat: pageFormat, build: (pw.Context context) => ReciboPagoPdf(args: widget.args, empresa: empresa)));
+      }
+
+      final sanitizedClientName = widget.args.nota.nombreCliente.replaceAll(RegExp(r'[^a-zA-Z0-9 ._-]'), '').trim();
+      final String filename = '${widget.args.nota.idnota}-${sanitizedClientName}.pdf';
+
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => doc.save(),
+        name: filename,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('✅ Documento enviado a la impresora.'), backgroundColor: Colors.green),
+        );
+        Navigator.of(context).pop();
+      }
+
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ Error al imprimir: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isPrinting = false);
+      }
+    }
+  }
+
+  Future<void> _sharePdf() async {
+    setState(() => _isPrinting = true);
+    try {
+      final doc = pw.Document();
+      final empresa = await _empresaFuture;
+
+      const pageFormat = PdfPageFormat(58 * PdfPageFormat.mm, double.infinity, marginAll: 2 * PdfPageFormat.mm);
+
+      if (widget.args.isDeliveryNote) {
+        doc.addPage(pw.Page(pageFormat: pageFormat, build: (pw.Context context) => NotaVentaPdf(args: widget.args, empresa: empresa)));
+      } else {
+        doc.addPage(pw.Page(pageFormat: pageFormat, build: (pw.Context context) => NotaVentaPdf(args: widget.args, empresa: empresa)));
+        doc.addPage(pw.Page(pageFormat: pageFormat, build: (pw.Context context) => NotaVentaPdf(args: widget.args, empresa: empresa)));
+        doc.addPage(pw.Page(pageFormat: pageFormat, build: (pw.Context context) => ReciboPagoPdf(args: widget.args, empresa: empresa)));
+      }
+
+      final sanitizedClientName = widget.args.nota.nombreCliente.replaceAll(RegExp(r'[^a-zA-Z0-9 ._-]'), '').trim();
+      final String filename = '${widget.args.nota.idnota}-${sanitizedClientName}.pdf';
+
+      await Printing.sharePdf(
+        bytes: await doc.save(),
+        filename: filename,
+      );
+
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ Error al compartir PDF: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isPrinting = false);
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final bool isMobile = Platform.isAndroid || Platform.isIOS;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Vista Previa de Impresión'),
@@ -151,12 +268,15 @@ class _PrintPreviewScreenState extends State<PrintPreviewScreen> {
                       _currentPage = index;
                     });
                   },
-                  children: [
-                    _buildTicketPage(NotaVentaTicket(args: widget.args, empresa: empresa)),
-                    _buildTicketPage(NotaVentaTicket(args: widget.args, empresa: empresa)),
-                    _buildTicketPage(ReciboPagoTicket(args: widget.args, empresa: empresa)),
-                  ],
-                ),
+                  children: widget.args.isDeliveryNote
+                      ? [
+                          _buildTicketPage(NotaVentaTicket(args: widget.args, empresa: empresa)),
+                        ]
+                      : [
+                          _buildTicketPage(NotaVentaTicket(args: widget.args, empresa: empresa)),
+                          _buildTicketPage(NotaVentaTicket(args: widget.args, empresa: empresa)),
+                          _buildTicketPage(ReciboPagoTicket(args: widget.args, empresa: empresa)),
+                        ],                ),
               ),
               _buildPageIndicator(),
             ],
@@ -165,16 +285,42 @@ class _PrintPreviewScreenState extends State<PrintPreviewScreen> {
       ),
       bottomNavigationBar: Padding(
         padding: const EdgeInsets.all(12.0),
-        child: ElevatedButton.icon(
-          onPressed: _isPrinting ? null : _printDocuments,
-          icon: _isPrinting ? const SizedBox.shrink() : const Icon(Icons.print_rounded),
-          label: _isPrinting ? const CircularProgressIndicator(color: Colors.white) : const Text('Confirmar e Imprimir'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF1E3A8A),
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
+        child: Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _isPrinting ? null : (isMobile ? _sharePdf : _savePdfToDownloads),
+                icon: _isPrinting
+                    ? const SizedBox.shrink()
+                    : Icon(isMobile ? Icons.share : Icons.save_alt),
+                label: _isPrinting
+                    ? const CircularProgressIndicator(color: Colors.white)
+                    : Text(isMobile ? 'Compartir' : 'Guardar PDF'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.grey[700],
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _isPrinting ? null : _printDocument,
+                icon: _isPrinting ? const SizedBox.shrink() : const Icon(Icons.print_rounded),
+                label: _isPrinting
+                    ? const SizedBox.shrink()
+                    : const Text('Imprimir'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1E3A8A),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -202,6 +348,7 @@ class _PrintPreviewScreenState extends State<PrintPreviewScreen> {
   }
 
   Widget _buildPageIndicator() {
+    final int pageCount = widget.args.isDeliveryNote ? 1 : 3;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Row(
@@ -220,7 +367,7 @@ class _PrintPreviewScreenState extends State<PrintPreviewScreen> {
                 : null,
           ),
           // Indicadores de puntos
-          ...List.generate(3, (index) {
+          ...List.generate(pageCount, (index) {
             return Container(
               width: 8.0,
               height: 8.0,
@@ -234,7 +381,7 @@ class _PrintPreviewScreenState extends State<PrintPreviewScreen> {
           // Botón de Siguiente
           IconButton(
             icon: const Icon(Icons.arrow_forward_ios),
-            onPressed: _currentPage < 2
+            onPressed: _currentPage < pageCount - 1
                 ? () {
                     _pageController.nextPage(
                       duration: const Duration(milliseconds: 300),
@@ -269,7 +416,7 @@ class NotaVentaTicket extends StatelessWidget {
           // Encabezado
           Center(child: Text(empresa.nombre, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10))),
           Center(child: Text(empresa.direccion, style: const TextStyle(fontSize: 8), textAlign: TextAlign.center)),
-          Center(child: Text('Tel: ${empresa.telefono}', style: const TextStyle(fontSize: 8))),
+          Center(child: Text('Tel: $empresa.telefono', style: const TextStyle(fontSize: 8))),
           const Divider(height: 10, thickness: 0.5),
           Text('Nota: #${args.nota.idnota}', style: const TextStyle(fontSize: 8)),
           Text('Fecha: ${dateFormat.format(DateTime.parse(args.nota.regtimestamp))}', style: const TextStyle(fontSize: 8)),
@@ -335,7 +482,7 @@ class ReciboPagoTicket extends StatelessWidget {
           // Encabezado
           Center(child: Text(empresa.nombre, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10))),
           Center(child: Text(empresa.direccion, style: const TextStyle(fontSize: 8), textAlign: TextAlign.center)),
-          Center(child: Text('Tel: ${empresa.telefono}', style: const TextStyle(fontSize: 8))),
+          Center(child: Text('Tel: $empresa.telefono', style: const TextStyle(fontSize: 8))),
           const Divider(height: 10, thickness: 0.5),
           const Center(child: Text('RECIBO DE PAGO', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 9))),
           const Divider(height: 10, thickness: 0.5),
@@ -398,7 +545,7 @@ class NotaVentaPdf extends pw.StatelessWidget {
       children: [
         pw.Center(child: pw.Text(empresa.nombre, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10))),
         pw.Center(child: pw.Text(empresa.direccion, style: const pw.TextStyle(fontSize: 8), textAlign: pw.TextAlign.center)),
-        pw.Center(child: pw.Text('Tel: ${empresa.telefono}', style: const pw.TextStyle(fontSize: 8))),
+        pw.Center(child: pw.Text('Tel: $empresa.telefono', style: const pw.TextStyle(fontSize: 8))),
         pw.Divider(height: 10, thickness: 0.5),
         pw.Text('Nota: #${args.nota.idnota}', style: const pw.TextStyle(fontSize: 8)),
         pw.Text('Fecha: ${dateFormat.format(DateTime.parse(args.nota.regtimestamp))}', style: const pw.TextStyle(fontSize: 8)),

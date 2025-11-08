@@ -12,6 +12,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
         if (isset($_GET['idcliente'])) {
             // --- Lógica para obtener notas de un cliente específico ---
             $idcliente = $_GET['idcliente'];
+            $fecha = $_GET['fecha'] ?? null;
 
             if (!filter_var($idcliente, FILTER_VALIDATE_INT)) {
                 throw new Exception("ID de cliente inválido.", 400);
@@ -41,11 +42,24 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
                         WHERE estado = 1
                         GROUP BY idnota
                     ) AS pagos_sum ON n.idnota = pagos_sum.idnota
-                    WHERE n.idcliente = ? AND n.saldo > 0
-                    ORDER BY n.regtimestamp DESC";
+                    WHERE n.idcliente = ? AND n.saldo > 0";
+            
+            $params = [$idcliente];
+            $types = "i";
+
+            if ($fecha) {
+                $sql .= " AND DATE(n.regtimestamp) = ?";
+                $types .= "s";
+                $params[] = $fecha;
+            }
+
+            $sql .= " ORDER BY n.regtimestamp DESC";
 
             $stmt = $conn->prepare($sql);
-            $stmt->bind_param("i", $idcliente);
+            if ($stmt === false) {
+                throw new Exception("Error al preparar la consulta de notas: " . $conn->error);
+            }
+            $stmt->bind_param($types, ...$params);
             $stmt->execute();
             $result = $stmt->get_result();
             $data = [];
@@ -56,16 +70,39 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
 
         } else {
             // --- Lógica para obtener la lista de clientes con notas pendientes ---
+            $fecha = $_GET['fecha'] ?? null;
+            $nombre_cliente_filtro = $_GET['nombre_cliente'] ?? null;
+
             $sql = "SELECT DISTINCT c.idcliente, c.nombrecliente 
                     FROM clientes AS c
                     JOIN notas AS n ON c.idcliente = n.idcliente
-                    WHERE n.saldo > 0
-                    ORDER BY c.nombrecliente ASC";
+                    WHERE n.saldo > 0";
             
-            $result = $conn->query($sql);
-            if ($result === false) {
-                throw new Exception("Error al consultar la lista de clientes: " . $conn->error);
+            $params = [];
+            $types = "";
+
+            if ($fecha) {
+                $sql .= " AND DATE(n.regtimestamp) = ?";
+                $types .= "s";
+                $params[] = $fecha;
             }
+            if ($nombre_cliente_filtro) {
+                $sql .= " AND c.nombrecliente LIKE ?";
+                $types .= "s";
+                $params[] = "%" . $nombre_cliente_filtro . "%";
+            }
+
+            $sql .= " ORDER BY c.nombrecliente ASC";
+            
+            $stmt = $conn->prepare($sql);
+            if ($stmt === false) {
+                throw new Exception("Error al preparar la consulta de clientes: " . $conn->error);
+            }
+            if (!empty($params)) {
+                $stmt->bind_param($types, ...$params);
+            }
+            $stmt->execute();
+            $result = $stmt->get_result();
             
             $data = [];
             while ($row = $result->fetch_assoc()) {

@@ -10,7 +10,7 @@ import 'package:crypto/crypto.dart'; // For sha256
 
 class DatabaseHelper {
   static final _databaseName = "embarques.db";
-  static final _databaseVersion = 6; // Versión incrementada para info de empresa y vendedor
+  static final _databaseVersion = 9; // Versión incrementada para añadir idcliente a notas_offline
 
   // --- Singleton ---
   DatabaseHelper._privateConstructor();
@@ -91,10 +91,11 @@ class DatabaseHelper {
       )
     ''');
 
-    // --- Notas Offline Tables ---
+    // --- Notas Offline Tables (Cache from server) ---
     await db.execute('''
       CREATE TABLE notas_offline (
         idnota INTEGER PRIMARY KEY,
+        idcliente INTEGER NOT NULL,
         total REAL NOT NULL,
         saldo REAL NOT NULL,
         regtimestamp TEXT NOT NULL,
@@ -122,6 +123,10 @@ class DatabaseHelper {
     
     await _createPagosOfflineTable(db);
     await _createEmpresaInfoTable(db);
+
+    // --- Tables for data created offline to be synced ---
+    await _createPagosPorSincronizarTable(db);
+    await _createNotasPorSincronizarTable(db);
   }
 
   Future<void> _createPagosOfflineTable(Database db) async {
@@ -131,7 +136,7 @@ class DatabaseHelper {
         idnota INTEGER NOT NULL,
         monto REAL NOT NULL,
         tipo_pago TEXT NOT NULL,
-        fecha TEXT NOT NULL,
+        regtimestamp TEXT NOT NULL,
         FOREIGN KEY (idnota) REFERENCES notas_offline (idnota) ON DELETE CASCADE
       )
     ''');
@@ -147,6 +152,33 @@ class DatabaseHelper {
       )
     ''');
   }
+
+  Future<void> _createPagosPorSincronizarTable(Database db) async {
+     await db.execute('''
+      CREATE TABLE pagos_por_sincronizar (
+        id_pago_local INTEGER PRIMARY KEY AUTOINCREMENT,
+        idnota INTEGER NOT NULL,
+        monto REAL NOT NULL,
+        tipo_pago TEXT NOT NULL,
+        regtimestamp TEXT NOT NULL,
+        id_usuario INTEGER NOT NULL,
+        synced INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+  }
+
+  Future<void> _createNotasPorSincronizarTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE notas_por_sincronizar (
+        id_nota_local INTEGER PRIMARY KEY AUTOINCREMENT,
+        id_embarque INTEGER NOT NULL,
+        regtimestamp TEXT NOT NULL,
+        id_usuario INTEGER NOT NULL,
+        synced INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+  }
+
 
   Future _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
@@ -206,7 +238,17 @@ class DatabaseHelper {
       await _createEmpresaInfoTable(db);
       await db.execute('ALTER TABLE notas_offline ADD COLUMN nombre_vendedor TEXT');
     }
-
+    if (oldVersion < 7) {
+      await db.execute('DROP TABLE IF EXISTS pagos_offline');
+      await _createPagosOfflineTable(db);
+    }
+    if (oldVersion < 8) {
+      await _createPagosPorSincronizarTable(db);
+      await _createNotasPorSincronizarTable(db);
+    }
+    if (oldVersion < 9) {
+      await db.execute('ALTER TABLE notas_offline ADD COLUMN idcliente INTEGER NOT NULL DEFAULT 0');
+    }
   }
 
   // --- Empresa Info Methods ---
@@ -359,6 +401,8 @@ class DatabaseHelper {
     return null;
   }
 
+  // --- Métodos para Sincronización de Subida ---
+
   Future<List<Map<String, dynamic>>> getUnsyncedEmbarques() async {
     final db = await database;
     if (db == null) return [];
@@ -375,8 +419,6 @@ class DatabaseHelper {
     ''');
     return result;
   }
-
-  // --- Métodos para Sincronización ---
 
   Future<Map<String, dynamic>> getFullEmbarque(int localId) async {
     final db = await database;
@@ -425,7 +467,33 @@ class DatabaseHelper {
     );
   }
 
-  // --- Notas Offline Methods ---
+  // --- Nuevos Métodos para Pagos y Notas por Sincronizar ---
+
+  Future<int> insertPagoParaSincronizar(Map<String, dynamic> pagoData) async {
+    final db = await database;
+    if (db == null) return -1;
+    return await db.insert('pagos_por_sincronizar', pagoData);
+  }
+
+  Future<List<Map<String, dynamic>>> getPagosParaSincronizar() async {
+    final db = await database;
+    if (db == null) return [];
+    return await db.query('pagos_por_sincronizar', where: 'synced = 0');
+  }
+
+  Future<void> marcarPagoComoSincronizado(int idLocal) async {
+    final db = await database;
+    if (db == null) return;
+    await db.update(
+      'pagos_por_sincronizar',
+      {'synced': 1},
+      where: 'id_pago_local = ?',
+      whereArgs: [idLocal],
+    );
+  }
+
+
+  // --- Notas Offline Methods (Cache) ---
 
   Future<int> insertNotaOffline(Map<String, dynamic> notaMap) async {
     final db = await database;
@@ -449,6 +517,39 @@ class DatabaseHelper {
     return await db.query('notas_offline', orderBy: 'regtimestamp DESC');
   }
 
+  Future<List<Map<String, dynamic>>> getClientesConSaldo() async {
+    final db = await database;
+    if (db == null) return [];
+    return await db.rawQuery('''
+      SELECT DISTINCT idcliente, nombre_cliente 
+      FROM notas_offline 
+      WHERE saldo > 0 
+      ORDER BY nombre_cliente ASC
+    ''');
+  }
+
+  Future<List<Map<String, dynamic>>> getNotasForCliente(int idCliente) async {
+    final db = await database;
+    if (db == null) return [];
+    return await db.query(
+      'notas_offline',
+      where: 'idcliente = ?',
+      whereArgs: [idCliente],
+      orderBy: 'regtimestamp DESC',
+    );
+  }
+
+  Future<void> updateNotaSaldo(int idnota, double nuevoSaldo, double nuevoMontoPagado) async {
+    final db = await database;
+    if (db == null) return;
+    await db.update(
+      'notas_offline',
+      {'saldo': nuevoSaldo, 'monto_pagado_acumulado': nuevoMontoPagado},
+      where: 'idnota = ?',
+      whereArgs: [idnota],
+    );
+  }
+
   Future<List<Map<String, dynamic>>> getNotaDetallesOffline(int idnota) async {
     final db = await database;
     if (db == null) return [];
@@ -459,14 +560,15 @@ class DatabaseHelper {
     );
   }
 
-  Future<void> clearAllNotasOffline() async {
+  Future<void> clearAllNotasData() async {
     final db = await database;
     if (db == null) return;
     await db.delete('notas_offline');
     await db.delete('nota_detalle_offline');
+    await db.delete('pagos_offline');
   }
 
-  // --- Pagos Offline Methods (Nuevos en v5) ---
+  // --- Pagos Offline Methods (Cache) ---
 
   Future<void> insertPagosOffline(List<Map<String, dynamic>> pagos) async {
     final db = await database;
@@ -483,6 +585,17 @@ class DatabaseHelper {
     });
   }
 
+  Future<List<Map<String, dynamic>>> getPagosForNota(int idnota) async {
+    final db = await database;
+    if (db == null) return [];
+    return await db.query(
+      'pagos_offline',
+      where: 'idnota = ?',
+      whereArgs: [idnota],
+      orderBy: 'regtimestamp DESC',
+    );
+  }
+
   Future<Map<String, dynamic>?> getLatestPagoForNota(int idnota) async {
     final db = await database;
     if (db == null) return null;
@@ -491,7 +604,7 @@ class DatabaseHelper {
       'pagos_offline',
       where: 'idnota = ?',
       whereArgs: [idnota],
-      orderBy: 'fecha DESC',
+      orderBy: 'regtimestamp DESC',
       limit: 1,
     );
 

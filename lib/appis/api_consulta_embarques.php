@@ -26,6 +26,7 @@ try {
             e.idcliente,
             e.idalmacen,
             e.idusuario,
+            e.idalmacenista, -- Añadido
             c.nombrecliente AS nombre_cliente,
             u.nombre AS nombreusuario,
             a.nombre AS nombre_almacenista
