@@ -6,11 +6,9 @@ import 'dart:io';
 import 'dart:convert'; // For utf8
 import 'package:crypto/crypto.dart'; // For sha256
 
-
-
 class DatabaseHelper {
   static final _databaseName = "embarques.db";
-  static final _databaseVersion = 9; // Versión incrementada para añadir idcliente a notas_offline
+  static final _databaseVersion = 10; // crear embarques_consulta
 
   // --- Singleton ---
   DatabaseHelper._privateConstructor();
@@ -30,10 +28,12 @@ class DatabaseHelper {
     }
     Directory documentsDirectory = await getApplicationDocumentsDirectory();
     String path = join(documentsDirectory.path, _databaseName);
-    return await openDatabase(path,
-        version: _databaseVersion,
-        onCreate: _onCreate,
-        onUpgrade: _onUpgrade);
+    return await openDatabase(
+      path,
+      version: _databaseVersion,
+      onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
+    );
   }
 
   Future _onCreate(Database db, int version) async {
@@ -48,7 +48,8 @@ class DatabaseHelper {
         regtimestamp TEXT NOT NULL,
         synced INTEGER NOT NULL DEFAULT 0
       )
-      ''');
+    ''');
+
     await db.execute('''
       CREATE TABLE embarque_detalle_offline (
         iddetalle_local INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,14 +61,24 @@ class DatabaseHelper {
         subtotal REAL NOT NULL,
         FOREIGN KEY (idfolioembarque_local_fk) REFERENCES embarque_offline (idfolioembarque_local) ON DELETE CASCADE
       )
-      ''');
+    ''');
 
     // --- Catalog Tables ---
-    await db.execute('CREATE TABLE almacenes_cat (id INTEGER PRIMARY KEY, nombre TEXT NOT NULL)');
-    await db.execute('CREATE TABLE clientes_cat (id INTEGER PRIMARY KEY, nombre TEXT NOT NULL)');
-    await db.execute('CREATE TABLE productos_cat (id INTEGER PRIMARY KEY, nombre TEXT NOT NULL)');
-    await db.execute('CREATE TABLE unidades_cat (id INTEGER PRIMARY KEY, nombre TEXT NOT NULL)');
-    await db.execute('CREATE TABLE almacenistas_cat (id INTEGER PRIMARY KEY, nombre TEXT NOT NULL)');
+    await db.execute(
+      'CREATE TABLE almacenes_cat (id INTEGER PRIMARY KEY, nombre TEXT NOT NULL)',
+    );
+    await db.execute(
+      'CREATE TABLE clientes_cat (id INTEGER PRIMARY KEY, nombre TEXT NOT NULL)',
+    );
+    await db.execute(
+      'CREATE TABLE productos_cat (id INTEGER PRIMARY KEY, nombre TEXT NOT NULL)',
+    );
+    await db.execute(
+      'CREATE TABLE unidades_cat (id INTEGER PRIMARY KEY, nombre TEXT NOT NULL)',
+    );
+    await db.execute(
+      'CREATE TABLE almacenistas_cat (id INTEGER PRIMARY KEY, nombre TEXT NOT NULL)',
+    );
 
     // --- Precios Table ---
     await db.execute('''
@@ -107,6 +118,7 @@ class DatabaseHelper {
         nombre_vendedor TEXT
       )
     ''');
+
     await db.execute('''
       CREATE TABLE nota_detalle_offline (
         iddetalle INTEGER PRIMARY KEY,
@@ -120,13 +132,30 @@ class DatabaseHelper {
         FOREIGN KEY (idnota_fk) REFERENCES notas_offline (idnota) ON DELETE CASCADE
       )
     ''');
-    
+
     await _createPagosOfflineTable(db);
     await _createEmpresaInfoTable(db);
 
     // --- Tables for data created offline to be synced ---
     await _createPagosPorSincronizarTable(db);
     await _createNotasPorSincronizarTable(db);
+
+    // --- NUEVA TABLA PARA CACHE DE CONSULTA DE EMBARQUES ---
+    await db.execute('''
+      CREATE TABLE embarques_consulta (
+        idfolioembarque INTEGER PRIMARY KEY,
+        regtimestamp TEXT,
+        nombre_cliente TEXT,
+        nombreusuario TEXT,
+        nombre_almacenista TEXT,
+        estado_embarque INTEGER,
+        fecha_filtro TEXT,
+        idcliente INTEGER,
+        idalmacen INTEGER,
+        idusuario INTEGER,
+        idalmacenista INTEGER
+      )
+    ''');
   }
 
   Future<void> _createPagosOfflineTable(Database db) async {
@@ -154,7 +183,7 @@ class DatabaseHelper {
   }
 
   Future<void> _createPagosPorSincronizarTable(Database db) async {
-     await db.execute('''
+    await db.execute('''
       CREATE TABLE pagos_por_sincronizar (
         id_pago_local INTEGER PRIMARY KEY AUTOINCREMENT,
         idnota INTEGER NOT NULL,
@@ -178,7 +207,6 @@ class DatabaseHelper {
       )
     ''');
   }
-
 
   Future _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
@@ -236,7 +264,9 @@ class DatabaseHelper {
     }
     if (oldVersion < 6) {
       await _createEmpresaInfoTable(db);
-      await db.execute('ALTER TABLE notas_offline ADD COLUMN nombre_vendedor TEXT');
+      await db.execute(
+        'ALTER TABLE notas_offline ADD COLUMN nombre_vendedor TEXT',
+      );
     }
     if (oldVersion < 7) {
       await db.execute('DROP TABLE IF EXISTS pagos_offline');
@@ -247,7 +277,27 @@ class DatabaseHelper {
       await _createNotasPorSincronizarTable(db);
     }
     if (oldVersion < 9) {
-      await db.execute('ALTER TABLE notas_offline ADD COLUMN idcliente INTEGER NOT NULL DEFAULT 0');
+      await db.execute(
+        'ALTER TABLE notas_offline ADD COLUMN idcliente INTEGER NOT NULL DEFAULT 0',
+      );
+    }
+    // 🚩 NUEVO para la versión 10: crear la tabla de consulta si no existía
+    if (oldVersion < 10) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS embarques_consulta (
+          idfolioembarque INTEGER PRIMARY KEY,
+          regtimestamp TEXT,
+          nombre_cliente TEXT,
+          nombreusuario TEXT,
+          nombre_almacenista TEXT,
+          estado_embarque INTEGER,
+          fecha_filtro TEXT,
+          idcliente INTEGER,
+          idalmacen INTEGER,
+          idusuario INTEGER,
+          idalmacenista INTEGER
+        )
+      ''');
     }
   }
 
@@ -264,7 +314,10 @@ class DatabaseHelper {
   Future<Map<String, dynamic>?> getEmpresaInfo() async {
     final db = await database;
     if (db == null) return null;
-    final List<Map<String, dynamic>> maps = await db.query('empresa_info', limit: 1);
+    final List<Map<String, dynamic>> maps = await db.query(
+      'empresa_info',
+      limit: 1,
+    );
     if (maps.isNotEmpty) {
       return maps.first;
     }
@@ -273,7 +326,12 @@ class DatabaseHelper {
 
   // --- User Credential Methods for Offline Login ---
 
-  Future<void> saveUserCredentials(int idUsuario, String username, String nombreUsuario, String password) async {
+  Future<void> saveUserCredentials(
+    int idUsuario,
+    String username,
+    String nombreUsuario,
+    String password,
+  ) async {
     final db = await database;
     if (db == null) return;
 
@@ -292,7 +350,10 @@ class DatabaseHelper {
     });
   }
 
-  Future<Map<String, dynamic>?> verifyOfflineLogin(String username, String password) async {
+  Future<Map<String, dynamic>?> verifyOfflineLogin(
+    String username,
+    String password,
+  ) async {
     final db = await database;
     if (db == null) return null;
 
@@ -328,7 +389,7 @@ class DatabaseHelper {
         'idalmacenista': payload['idalmacenista'],
         'idcliente': payload['idcliente'],
         'regtimestamp': DateTime.now().toIso8601String(),
-        'synced': 0
+        'synced': 0,
       };
       embarqueId = await txn.insert('embarque_offline', embarqueRow);
 
@@ -342,7 +403,7 @@ class DatabaseHelper {
           'idunidad': detalle['idunidad'],
           'cantidad': cantidad,
           'preciounitario': precio,
-          'subtotal': cantidad * precio
+          'subtotal': cantidad * precio,
         };
         await txn.insert('embarque_detalle_offline', detalleRow);
       }
@@ -352,14 +413,21 @@ class DatabaseHelper {
 
   // --- Catalog Methods ---
 
-  Future<void> batchUpdateCatalog(String tableName, List<Map<String, dynamic>> items) async {
+  Future<void> batchUpdateCatalog(
+    String tableName,
+    List<Map<String, dynamic>> items,
+  ) async {
     final db = await database;
     if (db == null) return;
 
     await db.transaction((txn) async {
       await txn.delete(tableName); // Clear old data
       for (final item in items) {
-        await txn.insert(tableName, item, conflictAlgorithm: ConflictAlgorithm.replace);
+        await txn.insert(
+          tableName,
+          item,
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
       }
     });
   }
@@ -367,7 +435,6 @@ class DatabaseHelper {
   Future<List<Map<String, dynamic>>> getCatalog(String tableName) async {
     final db = await database;
     if (db == null) return [];
-
     return await db.query(tableName);
   }
 
@@ -445,12 +512,16 @@ class DatabaseHelper {
       'idusuario': header['idusuario'],
       'idalmacenista': header['idalmacenista'],
       'idcliente': header['idcliente'],
-      'detalles': details.map((d) => {
-        'idproducto': d['idproducto'],
-        'idunidad': d['idunidad'],
-        'cantidad': d['cantidad'],
-        'preciounitario': d['preciounitario'],
-      }).toList(),
+      'detalles': details
+          .map(
+            (d) => {
+              'idproducto': d['idproducto'],
+              'idunidad': d['idunidad'],
+              'cantidad': d['cantidad'],
+              'preciounitario': d['preciounitario'],
+            },
+          )
+          .toList(),
     };
 
     return payload;
@@ -492,21 +563,30 @@ class DatabaseHelper {
     );
   }
 
-
   // --- Notas Offline Methods (Cache) ---
 
   Future<int> insertNotaOffline(Map<String, dynamic> notaMap) async {
     final db = await database;
     if (db == null) return -1;
-    return await db.insert('notas_offline', notaMap, conflictAlgorithm: ConflictAlgorithm.replace);
+    return await db.insert(
+      'notas_offline',
+      notaMap,
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
-  Future<void> insertNotaDetallesOffline(List<Map<String, dynamic>> detalles) async {
+  Future<void> insertNotaDetallesOffline(
+    List<Map<String, dynamic>> detalles,
+  ) async {
     final db = await database;
     if (db == null) return;
     await db.transaction((txn) async {
       for (var detalle in detalles) {
-        await txn.insert('nota_detalle_offline', detalle, conflictAlgorithm: ConflictAlgorithm.replace);
+        await txn.insert(
+          'nota_detalle_offline',
+          detalle,
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
       }
     });
   }
@@ -539,7 +619,11 @@ class DatabaseHelper {
     );
   }
 
-  Future<void> updateNotaSaldo(int idnota, double nuevoSaldo, double nuevoMontoPagado) async {
+  Future<void> updateNotaSaldo(
+    int idnota,
+    double nuevoSaldo,
+    double nuevoMontoPagado,
+  ) async {
     final db = await database;
     if (db == null) return;
     await db.update(
@@ -575,12 +659,19 @@ class DatabaseHelper {
     if (db == null || pagos.isEmpty) return;
 
     await db.transaction((txn) async {
-      // Opcional: borrar pagos viejos para esta nota antes de insertar los nuevos
       final idnota = pagos.first['idnota'];
-      await txn.delete('pagos_offline', where: 'idnota = ?', whereArgs: [idnota]);
+      await txn.delete(
+        'pagos_offline',
+        where: 'idnota = ?',
+        whereArgs: [idnota],
+      );
 
       for (var pago in pagos) {
-        await txn.insert('pagos_offline', pago, conflictAlgorithm: ConflictAlgorithm.replace);
+        await txn.insert(
+          'pagos_offline',
+          pago,
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
       }
     });
   }
@@ -620,5 +711,194 @@ class DatabaseHelper {
     await db.delete('pagos_offline');
   }
 
-}
+  // =========================================================
+  //  EMBARQUES CONSULTA (caché de lo que vino del servidor)
+  // =========================================================
 
+  /// Guarda en SQLite los embarques que te trajo el servidor
+  /// para una fecha dada. Primero borra los de esa fecha
+  /// y luego inserta los nuevos.
+  Future<void> cacheEmbarquesConsulta(
+    List<dynamic> embarques, {
+    required String fecha,
+  }) async {
+    final db = await database;
+    if (db == null) return;
+
+    await db.transaction((txn) async {
+      // limpiar lo de esa fecha
+      await txn.delete(
+        'embarques_consulta',
+        where: 'fecha_filtro = ?',
+        whereArgs: [fecha],
+      );
+
+      for (final e in embarques) {
+        int idfolioembarque;
+        String regtimestamp;
+        String nombreCliente;
+        String nombreUsuario;
+        String nombreAlmacenista;
+        int estadoEmbarque;
+        int idcliente;
+        int idalmacen;
+        int idusuario;
+        int idalmacenista;
+
+        if (e is Map<String, dynamic>) {
+          idfolioembarque = e['idfolioembarque'] as int;
+          regtimestamp = e['regtimestamp'] as String;
+          nombreCliente = e['nombre_cliente'] as String;
+          nombreUsuario = e['nombreusuario'] as String;
+          nombreAlmacenista = e['nombre_almacenista'] as String;
+          estadoEmbarque = (e['esActivo'] == true || e['estado_embarque'] == 1)
+              ? 1
+              : 0;
+          idcliente = e['idcliente'] as int;
+          idalmacen = e['idalmacen'] as int;
+          idusuario = e['idusuario'] as int;
+          idalmacenista = e['idalmacenista'] as int;
+        } else {
+          // asumimos modelo EmbarqueConsulta
+          idfolioembarque = e.idfolioembarque as int;
+          regtimestamp = e.regtimestamp as String;
+          nombreCliente = e.nombre_cliente as String;
+          nombreUsuario = e.nombreusuario as String;
+          nombreAlmacenista = e.nombre_almacenista as String;
+          estadoEmbarque = e.esActivo == true ? 1 : 0;
+          idcliente = e.idcliente as int;
+          idalmacen = e.idalmacen as int;
+          idusuario = e.idusuario as int;
+          idalmacenista = e.idalmacenista as int;
+        }
+
+        await txn.insert('embarques_consulta', {
+          'idfolioembarque': idfolioembarque,
+          'regtimestamp': regtimestamp,
+          'nombre_cliente': nombreCliente,
+          'nombreusuario': nombreUsuario,
+          'nombre_almacenista': nombreAlmacenista,
+          'estado_embarque': estadoEmbarque,
+          'fecha_filtro': fecha,
+          'idcliente': idcliente,
+          'idalmacen': idalmacen,
+          'idusuario': idusuario,
+          'idalmacenista': idalmacenista,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+    });
+  }
+
+  /// Lee de SQLite los embarques que ya estaban sincronizados
+  /// para esa fecha (y opcionalmente por almacén)
+  Future<List<Map<String, dynamic>>> getEmbarquesConsulta({
+    required String fecha,
+    int? idAlmacen,
+  }) async {
+    final db = await database;
+    if (db == null) return [];
+
+    if (idAlmacen != null) {
+      return await db.query(
+        'embarques_consulta',
+        where: 'fecha_filtro = ? AND idalmacen = ?',
+        whereArgs: [fecha, idAlmacen],
+        orderBy: 'regtimestamp DESC',
+      );
+    } else {
+      return await db.query(
+        'embarques_consulta',
+        where: 'fecha_filtro = ?',
+        whereArgs: [fecha],
+        orderBy: 'regtimestamp DESC',
+      );
+    }
+  }
+
+  // ---------------------------------------------------------
+  // Cuando un embarque OFFLINE se sincroniza al servidor,
+  // lo pasamos a la tabla embarques_consulta para que aparezca
+  // de inmediato en la pestaña de CONSULTAR (online u offline)
+  // ---------------------------------------------------------
+  Future<void> insertEmbarqueConsultaFromOffline({
+    required int localId, // id en embarque_offline
+    required int serverId, // id que te regresó el servidor
+  }) async {
+    final db = await database;
+    if (db == null) return;
+
+    // 1. leer encabezado offline
+    final List<Map<String, dynamic>> headers = await db.query(
+      'embarque_offline',
+      where: 'idfolioembarque_local = ?',
+      whereArgs: [localId],
+      limit: 1,
+    );
+
+    if (headers.isEmpty) return;
+
+    final header = headers.first;
+
+    final int idcliente = header['idcliente'] as int;
+    final int idalmacen = header['idalmacen'] as int;
+    final int idusuario = header['idusuario'] as int;
+    final int idalmacenista = header['idalmacenista'] as int;
+    final String regtimestamp = header['regtimestamp'] as String;
+
+    // fecha_filtro = solo la fecha (igual que haces en la pantalla)
+    final String fechaFiltro = regtimestamp.split('T').first;
+
+    // 2. sacar nombres desde los catálogos
+    String nombreCliente = 'N/A';
+    final cli = await db.query(
+      'clientes_cat',
+      where: 'id = ?',
+      whereArgs: [idcliente],
+      limit: 1,
+    );
+    if (cli.isNotEmpty) {
+      nombreCliente = cli.first['nombre'] as String;
+    }
+
+    String nombreAlmacenista = 'N/A';
+    final alm = await db.query(
+      'almacenistas_cat',
+      where: 'id = ?',
+      whereArgs: [idalmacenista],
+      limit: 1,
+    );
+    if (alm.isNotEmpty) {
+      nombreAlmacenista = alm.first['nombre'] as String;
+    }
+
+    // como solo guardas un usuario offline, tomamos el primero
+    String nombreUsuario = 'Usuario';
+    final user = await db.query('user_credentials', limit: 1);
+    if (user.isNotEmpty) {
+      nombreUsuario = user.first['nombre_usuario'] as String;
+    }
+
+    // 3. insertar/actualizar en embarques_consulta
+    await db.insert('embarques_consulta', {
+      'idfolioembarque': serverId, // el id real del servidor
+      'regtimestamp': regtimestamp,
+      'nombre_cliente': nombreCliente,
+      'nombreusuario': nombreUsuario,
+      'nombre_almacenista': nombreAlmacenista,
+      'estado_embarque': 1,
+      'fecha_filtro': fechaFiltro,
+      'idcliente': idcliente,
+      'idalmacen': idalmacen,
+      'idusuario': idusuario,
+      'idalmacenista': idalmacenista,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+
+    // 4. marcar como sincronizado (o lo borras si quieres)
+    await db.update(
+      'embarque_offline',
+      {'synced': 1},
+      where: 'idfolioembarque_local = ?',
+      whereArgs: [localId],
+    );
+  }
+}
