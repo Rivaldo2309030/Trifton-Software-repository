@@ -8,7 +8,7 @@ import 'package:crypto/crypto.dart'; // For sha256
 
 class DatabaseHelper {
   static final _databaseName = "embarques.db";
-  static final _databaseVersion = 10; // crear embarques_consulta
+  static final _databaseVersion = 11; // <<< VERSION INCREMENTADA
 
   // --- Singleton ---
   DatabaseHelper._privateConstructor();
@@ -119,16 +119,21 @@ class DatabaseHelper {
       )
     ''');
 
+    // --- TABLA NOTA_DETALLE_OFFLINE ACTUALIZADA ---
     await db.execute('''
       CREATE TABLE nota_detalle_offline (
         iddetalle INTEGER PRIMARY KEY,
         idnota_fk INTEGER NOT NULL,
+        idproducto INTEGER,
+        idunidad INTEGER,
         cantidad REAL NOT NULL,
         precio REAL NOT NULL,
         total REAL NOT NULL,
-        idestatus INTEGER NOT NULL,
+        idestatus INTEGER,
         nombreproducto TEXT NOT NULL,
         nombreunidad TEXT NOT NULL,
+        regtimestamp TEXT,
+        estado INTEGER,
         FOREIGN KEY (idnota_fk) REFERENCES notas_offline (idnota) ON DELETE CASCADE
       )
     ''');
@@ -281,7 +286,6 @@ class DatabaseHelper {
         'ALTER TABLE notas_offline ADD COLUMN idcliente INTEGER NOT NULL DEFAULT 0',
       );
     }
-    // 🚩 NUEVO para la versión 10: crear la tabla de consulta si no existía
     if (oldVersion < 10) {
       await db.execute('''
         CREATE TABLE IF NOT EXISTS embarques_consulta (
@@ -299,15 +303,50 @@ class DatabaseHelper {
         )
       ''');
     }
+    // --- NUEVA MIGRACIÓN PARA v11 ---
+    if (oldVersion < 11) {
+      try {
+        await db.execute('ALTER TABLE nota_detalle_offline ADD COLUMN idproducto INTEGER');
+        await db.execute('ALTER TABLE nota_detalle_offline ADD COLUMN idunidad INTEGER');
+        await db.execute('ALTER TABLE nota_detalle_offline ADD COLUMN regtimestamp TEXT');
+        await db.execute('ALTER TABLE nota_detalle_offline ADD COLUMN estado INTEGER');
+      } catch (e) {
+        print('Error al migrar nota_detalle_offline a v11: $e. Recreando tabla.');
+        await db.execute('DROP TABLE IF EXISTS nota_detalle_offline');
+        await db.execute('''
+          CREATE TABLE nota_detalle_offline (
+            iddetalle INTEGER PRIMARY KEY,
+            idnota_fk INTEGER NOT NULL,
+            idproducto INTEGER,
+            idunidad INTEGER,
+            cantidad REAL NOT NULL,
+            precio REAL NOT NULL,
+            total REAL NOT NULL,
+            idestatus INTEGER,
+            nombreproducto TEXT NOT NULL,
+            nombreunidad TEXT NOT NULL,
+            regtimestamp TEXT,
+            estado INTEGER,
+            FOREIGN KEY (idnota_fk) REFERENCES notas_offline (idnota) ON DELETE CASCADE
+          )
+        ''');
+      }
+    }
   }
 
   // --- Empresa Info Methods ---
   Future<void> saveEmpresaInfo(Map<String, dynamic> empresaData) async {
     final db = await database;
     if (db == null) return;
+    // La API devuelve un objeto, no una lista. Lo insertamos directamente.
+    final Map<String, dynamic> cleanData = {
+      'nombre': empresaData['nombre'] ?? 'N/A',
+      'direccion': empresaData['direccion'] ?? 'N/A',
+      'telefono': empresaData['telefono'] ?? 'N/A',
+    };
     await db.transaction((txn) async {
-      await txn.delete('empresa_info'); // Solo hay una fila
-      await txn.insert('empresa_info', empresaData);
+      await txn.delete('empresa_info'); 
+      await txn.insert('empresa_info', cleanData);
     });
   }
 
@@ -428,6 +467,50 @@ class DatabaseHelper {
           item,
           conflictAlgorithm: ConflictAlgorithm.replace,
         );
+      }
+    });
+  }
+
+  Future<void> batchUpdatePrecios(List<Map<String, dynamic>> items) async {
+    final db = await database;
+    if (db == null) return;
+    await db.transaction((txn) async {
+      await txn.delete('precios_cat');
+      for (final item in items) {
+        await txn.insert('precios_cat', item, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+    });
+  }
+
+  Future<void> batchUpdateNotas(List<Map<String, dynamic>> items) async {
+    final db = await database;
+    if (db == null) return;
+    await db.transaction((txn) async {
+      await txn.delete('notas_offline');
+      for (final item in items) {
+        await txn.insert('notas_offline', item, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+    });
+  }
+
+  Future<void> batchUpdateNotaDetalles(List<Map<String, dynamic>> items) async {
+    final db = await database;
+    if (db == null) return;
+    await db.transaction((txn) async {
+      await txn.delete('nota_detalle_offline');
+      for (final item in items) {
+        await txn.insert('nota_detalle_offline', item, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+    });
+  }
+
+  Future<void> batchUpdatePagos(List<Map<String, dynamic>> items) async {
+    final db = await database;
+    if (db == null) return;
+    await db.transaction((txn) async {
+      await txn.delete('pagos_offline');
+      for (final item in items) {
+        await txn.insert('pagos_offline', item, conflictAlgorithm: ConflictAlgorithm.replace);
       }
     });
   }
@@ -703,6 +786,69 @@ class DatabaseHelper {
       return maps.first;
     }
     return null;
+  }
+
+  /// Busca el pago más reciente para una nota, buscando tanto en los pagos
+  /// ya sincronizados como en los que están pendientes por subir.
+  Future<Map<String, dynamic>?> getLatestPagoForNotaIncludingPending(int idnota) async {
+    final db = await database;
+    if (db == null) return null;
+
+    // 1. Obtener el último pago de la tabla de sincronizados
+    final List<Map<String, dynamic>> syncedMaps = await db.query(
+      'pagos_offline',
+      where: 'idnota = ?',
+      whereArgs: [idnota],
+      orderBy: 'regtimestamp DESC',
+      limit: 1,
+    );
+    Map<String, dynamic>? latestSynced = syncedMaps.isNotEmpty ? syncedMaps.first : null;
+
+    // 2. Obtener el último pago de la tabla de pendientes
+    final List<Map<String, dynamic>> pendingMaps = await db.query(
+      'pagos_por_sincronizar',
+      where: 'idnota = ?',
+      whereArgs: [idnota],
+      orderBy: 'regtimestamp DESC',
+      limit: 1,
+    );
+    Map<String, dynamic>? latestPending = pendingMaps.isNotEmpty ? pendingMaps.first : null;
+
+    // 3. Comparar y devolver el más reciente
+    if (latestSynced == null && latestPending == null) {
+      return null; // No hay pagos de ningún tipo
+    }
+    if (latestSynced != null && latestPending == null) {
+      return latestSynced; // Solo hay sincronizados
+    }
+    if (latestSynced == null && latestPending != null) {
+      // Solo hay pendientes, normalizar el mapa antes de devolver
+      return {
+        'idpago': latestPending['id_pago_local'], // Usar id local como referencia
+        'idnota': latestPending['idnota'],
+        'monto': latestPending['monto'],
+        'tipo_pago': latestPending['tipo_pago'],
+        'regtimestamp': latestPending['regtimestamp'],
+      };
+    }
+
+    // Si hay ambos, comparar por fecha
+    final syncedDate = DateTime.parse(latestSynced!['regtimestamp'] as String);
+    final pendingDate = DateTime.parse(latestPending!['regtimestamp'] as String);
+
+    if (pendingDate.isAfter(syncedDate)) {
+      // El pendiente es más nuevo, normalizar y devolver
+       return {
+        'idpago': latestPending['id_pago_local'],
+        'idnota': latestPending['idnota'],
+        'monto': latestPending['monto'],
+        'tipo_pago': latestPending['tipo_pago'],
+        'regtimestamp': latestPending['regtimestamp'],
+      };
+    } else {
+      // El sincronizado es más nuevo o igual
+      return latestSynced;
+    }
   }
 
   Future<void> clearAllPagosOffline() async {

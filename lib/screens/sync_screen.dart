@@ -18,6 +18,7 @@ class _SyncScreenState extends State<SyncScreen> {
   bool _isLoading = true;
   bool _isBulkUploading = false;
   bool _isDownloading = false;
+  String _syncMessage = ''; // <<< NUEVA VARIABLE DE ESTADO
   String? _lastSyncTimestamp;
 
   // Listas de datos no sincronizados
@@ -66,6 +67,7 @@ class _SyncScreenState extends State<SyncScreen> {
     }
   }
 
+  // --- NUEVA FUNCIÓN DE DESCARGA SECUENCIAL ---
   Future<void> _prepararJornada() async {
     if (_isDownloading || _isBulkUploading) return;
 
@@ -75,54 +77,95 @@ class _SyncScreenState extends State<SyncScreen> {
       return;
     }
 
-    setState(() { _isDownloading = true; });
-    
-    showDialog(context: context, barrierDismissible: false, builder: (BuildContext context) => const Dialog(child: Padding(padding: EdgeInsets.all(20.0), child: Row(mainAxisSize: MainAxisSize.min, children: [CircularProgressIndicator(), SizedBox(width: 20), Text("Descargando datos...")]))));
+    setState(() {
+      _isDownloading = true;
+      _syncMessage = 'Iniciando preparación...';
+    });
+
+    final db = DatabaseHelper.instance;
+    final prefs = await SharedPreferences.getInstance();
+
+    final List<Map<String, dynamic>> syncTasks = [
+      {'entity': 'empresa', 'handler': db.saveEmpresaInfo, 'isList': false},
+      {'entity': 'clientes', 'handler': (data) => db.batchUpdateCatalog('clientes_cat', data), 'isList': true},
+      {'entity': 'productos', 'handler': (data) => db.batchUpdateCatalog('productos_cat', data), 'isList': true},
+      {'entity': 'almacenes', 'handler': (data) => db.batchUpdateCatalog('almacenes_cat', data), 'isList': true},
+      {'entity': 'almacenistas', 'handler': (data) => db.batchUpdateCatalog('almacenistas_cat', data), 'isList': true},
+      {'entity': 'unidades', 'handler': (data) => db.batchUpdateCatalog('unidades_cat', data), 'isList': true},
+      {'entity': 'precios', 'handler': db.batchUpdatePrecios, 'isList': true},
+      {'entity': 'notas', 'handler': db.batchUpdateNotas, 'isList': true},
+      {'entity': 'nota_detalles', 'handler': db.batchUpdateNotaDetalles, 'isList': true},
+      {'entity': 'pagos', 'handler': db.batchUpdatePagos, 'isList': true},
+    ];
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final idUsuario = prefs.getInt('idusuario');
-      if (idUsuario == null) throw Exception('No se encontró el ID de usuario.');
+      // Limpiar datos antiguos primero
+      await db.clearAllNotasData();
 
-      final url = Uri.parse('${ApiConfig.baseUrl}api_get_all_data_for_offline.php?idusuario=$idUsuario');
-      final response = await http.get(url).timeout(const Duration(seconds: 60));
+      for (var task in syncTasks) {
+        final entity = task['entity'];
+        if (!mounted) return;
+        setState(() { _syncMessage = 'Descargando $entity...'; });
 
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final db = DatabaseHelper.instance;
+        final url = Uri.parse('${ApiConfig.baseUrl}api_sync_downloader.php?entity=$entity');
+        final response = await http.get(url).timeout(const Duration(seconds: 90));
 
-        await db.clearAllNotasData();
-
-        if (data['notas'] != null && (data['notas'] as List).isNotEmpty) {
-          for (var nota in (data['notas'] as List)) {
-            await db.insertNotaOffline(Map<String, dynamic>.from(nota));
+        if (response.statusCode == 200) {
+          final decoded = json.decode(response.body);
+          if (decoded['success'] == true) {
+            final data = decoded['data'];
+            if (task['isList'] as bool) {
+              await task['handler'](List<Map<String, dynamic>>.from(data));
+            } else {
+              await task['handler'](Map<String, dynamic>.from(data));
+            }
+          } else {
+            throw Exception('Error en API para $entity: ${decoded['error']}');
           }
+        } else {
+          String errorMessage = 'Error de servidor para $entity: ${response.statusCode}';
+          // Try to decode the error message from the API response
+          try {
+              final errorDecoded = json.decode(response.body);
+              if (errorDecoded['error'] != null) {
+                  errorMessage = 'Error en $entity: ${errorDecoded['error']}';
+              }
+          } catch (_) {
+              // Could not decode JSON, stick with the original error message
+          }
+          throw Exception(errorMessage);
         }
-        if (data['detalles'] != null && (data['detalles'] as List).isNotEmpty) {
-          await db.insertNotaDetallesOffline(List<Map<String, dynamic>>.from(data['detalles']));
-        }
-        if (data['pagos'] != null && (data['pagos'] as List).isNotEmpty) {
-          await db.insertPagosOffline(List<Map<String, dynamic>>.from(data['pagos']));
-        }
-
-        final now = DateTime.now();
-        final formattedTimestamp = DateFormat('dd/MM/yyyy HH:mm:ss').format(now);
-        await prefs.setString('lastSyncTimestamp', formattedTimestamp);
-        if (mounted) {
-          setState(() { _lastSyncTimestamp = formattedTimestamp; });
-          Navigator.of(context).pop();
-          _showSuccessSnackBar('✅ Jornada preparada con éxito.');
-        }
-      } else {
-        throw Exception('Error del servidor: ${response.statusCode}');
       }
+
+      final now = DateTime.now();
+      final formattedTimestamp = DateFormat('dd/MM/yyyy HH:mm:ss').format(now);
+      await prefs.setString('lastSyncTimestamp', formattedTimestamp);
+      
+      if (mounted) {
+        setState(() {
+          _lastSyncTimestamp = formattedTimestamp;
+          _syncMessage = '✅ ¡Jornada preparada con éxito!';
+        });
+        _showSuccessSnackBar('Datos offline actualizados.');
+      }
+
     } catch (e) {
       if (mounted) {
-        Navigator.of(context).pop();
-        _showErrorSnackBar('❌ Error al preparar jornada: $e');
+        setState(() { _syncMessage = '❌ Error durante la descarga.'; });
+        _showErrorSnackBar('Error al preparar jornada: $e');
       }
     } finally {
-      if (mounted) setState(() { _isDownloading = false; });
+      if (mounted) {
+        // Dejar el mensaje de éxito/error visible un momento antes de limpiar
+        Future.delayed(const Duration(seconds: 4), () {
+          if(mounted) {
+            setState(() {
+              _isDownloading = false;
+              _syncMessage = '';
+            });
+          }
+        });
+      }
     }
   }
 
@@ -272,7 +315,17 @@ class _SyncScreenState extends State<SyncScreen> {
               onPressed: _isDownloading || _isBulkUploading ? null : _prepararJornada,
               style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).primaryColor, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12)),
             ),
-            if (_isDownloading) const Padding(padding: EdgeInsets.only(top: 8.0), child: LinearProgressIndicator()),
+            if (_isDownloading)
+              Padding(
+                padding: const EdgeInsets.only(top: 16.0),
+                child: Column(
+                  children: [
+                    const LinearProgressIndicator(),
+                    const SizedBox(height: 8),
+                    Text(_syncMessage, style: const TextStyle(color: Colors.blueGrey, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ),
             const SizedBox(height: 8),
             Center(child: Text(_lastSyncTimestamp != null ? 'Última actualización: $_lastSyncTimestamp' : 'Aún no se han descargado datos.', style: Theme.of(context).textTheme.bodySmall)),
           ],

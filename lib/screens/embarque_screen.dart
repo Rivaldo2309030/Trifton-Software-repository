@@ -1217,6 +1217,20 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
       if (mounted) {
         final notaDecoded = json.decode(notaResponse.body);
         if (notaResponse.statusCode == 201 && notaDecoded['success'] == true) {
+          // --- INICIO: Guardar la nueva nota en la BD local ---
+          if (notaDecoded['nota'] != null) {
+            try {
+              final dbHelper = DatabaseHelper.instance;
+              await dbHelper
+                  .insertNotaOffline(notaDecoded['nota'] as Map<String, dynamic>);
+              print('Nueva nota insertada en la base de datos local.');
+            } catch (e) {
+              print('Error al guardar la nota localmente: $e');
+              // Opcional: notificar al usuario que la nota se generó pero no se pudo mostrar localmente.
+            }
+          }
+          // --- FIN: Guardar la nueva nota en la BD local ---
+
           _snack(
             '✅ Nota #${notaDecoded['idnota']} generada correctamente.',
             color: Colors.green,

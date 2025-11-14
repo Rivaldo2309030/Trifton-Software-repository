@@ -126,8 +126,37 @@ try {
     // 9. Confirmar la transacción
     $conn->commit();
 
+    // 10. Recuperar la nota recién creada para devolverla
+    $sql_select_new = "
+        SELECT 
+            n.idnota, n.total, n.saldo, n.regtimestamp, n.idalmacen,
+            c.nombrecliente AS nombre_cliente,
+            u.nombre AS nombre_vendedor,
+            alm_salida.nombrealmacen AS nombre_almacen_salida,
+            alm_origen.nombrealmacen AS nombre_almacen_origen,
+            0 AS monto_pagado_acumulado
+        FROM notas AS n
+        JOIN clientes AS c ON n.idcliente = c.idcliente
+        JOIN usuarios AS u ON n.idusuario = u.idusuario
+        JOIN almacenes AS alm_salida ON n.idalmacen = alm_salida.idalmacen
+        LEFT JOIN embarque AS e ON n.idembarque = e.idfolioembarque
+        LEFT JOIN almacenes AS alm_origen ON e.idalmacen = alm_origen.idalmacen
+        WHERE n.idnota = ?";
+    
+    $stmt_select = $conn->prepare($sql_select_new);
+    $stmt_select->bind_param("i", $idnota);
+    $stmt_select->execute();
+    $result_new_nota = $stmt_select->get_result();
+    $nueva_nota_data = $result_new_nota->fetch_assoc();
+    $stmt_select->close();
+
     http_response_code(201);
-    echo json_encode(['success' => true, 'message' => 'Nota creada correctamente.', 'idnota' => $idnota]);
+    echo json_encode([
+        'success' => true, 
+        'message' => 'Nota creada correctamente.', 
+        'idnota' => $idnota,
+        'nota' => $nueva_nota_data
+    ]);
 
 } catch (Exception $e) {
     $conn->rollback();

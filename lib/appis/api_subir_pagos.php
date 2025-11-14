@@ -32,7 +32,7 @@ $errores = [];
 $exitosos = 0;
 
 try {
-    $stmt_insert_pago = $conn->prepare("INSERT INTO pagos (idnota, monto, tipo_pago, regtimestamp, idusuario) VALUES (?, ?, ?, ?, ?)");
+    $stmt_insert_pago = $conn->prepare("INSERT INTO pagos_m (idnota, totalpago, tipopago, regtimestamp) VALUES (?, ?, ?, ?)");
     $stmt_update_nota = $conn->prepare("UPDATE notas SET saldo = saldo - ?, pagos = pagos + ? WHERE idnota = ?");
 
     if (!$stmt_insert_pago || !$stmt_update_nota) {
@@ -41,7 +41,7 @@ try {
 
     foreach ($pagos as $pago) {
         // Validar cada pago
-        if (!isset($pago['idnota'], $pago['monto'], $pago['tipo_pago'], $pago['regtimestamp'], $pago['id_usuario'])) {
+        if (!isset($pago['idnota'], $pago['monto'], $pago['tipo_pago'], $pago['regtimestamp'])) {
             $errores[] = "Pago inválido, faltan campos. Datos: " . json_encode($pago);
             continue;
         }
@@ -50,10 +50,9 @@ try {
         $monto = $pago['monto'];
         $tipo_pago = $pago['tipo_pago'];
         $regtimestamp = $pago['regtimestamp'];
-        $id_usuario = $pago['id_usuario'];
-
+        
         // 1. Insertar el pago
-        $stmt_insert_pago->bind_param("idssi", $idnota, $monto, $tipo_pago, $regtimestamp, $id_usuario);
+        $stmt_insert_pago->bind_param("idss", $idnota, $monto, $tipo_pago, $regtimestamp);
         if (!$stmt_insert_pago->execute()) {
             $errores[] = "Error al insertar pago para la nota $idnota: " . $stmt_insert_pago->error;
             continue; // Saltar al siguiente pago

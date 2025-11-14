@@ -622,7 +622,7 @@ class _NotaDetailScreenState extends State<NotaDetailScreen> {
 
   Future<void> _printFromOffline() async {
     final dbHelper = DatabaseHelper.instance;
-    final localPago = await dbHelper.getLatestPagoForNota(_notaActual.idnota);
+    final localPago = await dbHelper.getLatestPagoForNotaIncludingPending(_notaActual.idnota);
 
     if (!mounted) return;
 
