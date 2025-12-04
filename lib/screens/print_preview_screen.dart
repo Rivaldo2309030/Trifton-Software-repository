@@ -416,19 +416,24 @@ class NotaVentaTicket extends StatelessWidget {
           // Encabezado
           Center(child: Text(empresa.nombre, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10))),
           Center(child: Text(empresa.direccion, style: const TextStyle(fontSize: 8), textAlign: TextAlign.center)),
-          Center(child: Text('Tel: $empresa.telefono', style: const TextStyle(fontSize: 8))),
+          if (empresa.telefono.isNotEmpty && empresa.telefono != 'N/A')
+            Center(child: Text('Tel: ${empresa.telefono}', style: const TextStyle(fontSize: 8))),
           const Divider(height: 10, thickness: 0.5),
           Text('Nota: #${args.nota.idnota}', style: const TextStyle(fontSize: 8)),
           Text('Fecha: ${dateFormat.format(DateTime.parse(args.nota.regtimestamp))}', style: const TextStyle(fontSize: 8)),
           Text('Vendedor: ${args.nombreVendedor}', style: const TextStyle(fontSize: 8)),
           const Divider(height: 10, thickness: 0.5),
+          Text('Cliente: ${args.nota.nombreCliente}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 8)),
+          Text('ID: ${args.nota.idcliente}', style: const TextStyle(fontSize: 8)),
+          const Divider(height: 10, thickness: 0.5),
 
           // Cuerpo
-          const Row(
-            children: [
-              Expanded(flex: 1, child: Text('Cant', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 8))),
+          Row(
+            children: const [
+              Expanded(flex: 2, child: Text('Cant', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 8))),
               Expanded(flex: 5, child: Text('Producto', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 8))),
-              Expanded(flex: 2, child: Text('Importe', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 8), textAlign: TextAlign.right)),
+              Expanded(flex: 3, child: Text('P/U', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 8), textAlign: TextAlign.right)),
+              Expanded(flex: 3, child: Text('Importe', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 8), textAlign: TextAlign.right)),
             ],
           ),
           const Divider(thickness: 1, color: Colors.black),
@@ -437,9 +442,10 @@ class NotaVentaTicket extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(flex: 1, child: Text(item.cantidad.toStringAsFixed(0), style: const TextStyle(fontSize: 8))),
+                Expanded(flex: 2, child: Text(item.cantidad.toStringAsFixed(0), style: const TextStyle(fontSize: 8))),
                 Expanded(flex: 5, child: Text(item.nombreProducto, style: const TextStyle(fontSize: 8))),
-                Expanded(flex: 2, child: Text(currencyFormat.format(item.total), style: const TextStyle(fontSize: 8), textAlign: TextAlign.right)),
+                Expanded(flex: 3, child: Text(currencyFormat.format(item.precio), style: const TextStyle(fontSize: 8), textAlign: TextAlign.right)),
+                Expanded(flex: 3, child: Text(currencyFormat.format(item.total), style: const TextStyle(fontSize: 8), textAlign: TextAlign.right)),
               ],
             ),
           )),
@@ -482,12 +488,17 @@ class ReciboPagoTicket extends StatelessWidget {
           // Encabezado
           Center(child: Text(empresa.nombre, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10))),
           Center(child: Text(empresa.direccion, style: const TextStyle(fontSize: 8), textAlign: TextAlign.center)),
-          Center(child: Text('Tel: $empresa.telefono', style: const TextStyle(fontSize: 8))),
+          if (empresa.telefono.isNotEmpty && empresa.telefono != 'N/A')
+            Center(child: Text('Tel: ${empresa.telefono}', style: const TextStyle(fontSize: 8))),
           const Divider(height: 10, thickness: 0.5),
           const Center(child: Text('RECIBO DE PAGO', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 9))),
           const Divider(height: 10, thickness: 0.5),
           Text('Nota: #${args.nota.idnota}', style: const TextStyle(fontSize: 8)),
           Text('Fecha: ${dateFormat.format(DateTime.parse(args.nota.regtimestamp))}', style: const TextStyle(fontSize: 8)),
+          Text('Vendedor: ${args.nombreVendedor}', style: const TextStyle(fontSize: 8)),
+          const Divider(height: 10, thickness: 0.5),
+          Text('Cliente: ${args.nota.nombreCliente}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 8)),
+          Text('ID: ${args.nota.idcliente}', style: const TextStyle(fontSize: 8)),
           const Divider(height: 10, thickness: 0.5),
 
           // Cuerpo
@@ -545,19 +556,24 @@ class NotaVentaPdf extends pw.StatelessWidget {
       children: [
         pw.Center(child: pw.Text(empresa.nombre, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10))),
         pw.Center(child: pw.Text(empresa.direccion, style: const pw.TextStyle(fontSize: 8), textAlign: pw.TextAlign.center)),
-        pw.Center(child: pw.Text('Tel: $empresa.telefono', style: const pw.TextStyle(fontSize: 8))),
+        if (empresa.telefono.isNotEmpty && empresa.telefono != 'N/A')
+          pw.Center(child: pw.Text('Tel: ${empresa.telefono}', style: const pw.TextStyle(fontSize: 8))),
         pw.Divider(height: 10, thickness: 0.5),
         pw.Text('Nota: #${args.nota.idnota}', style: const pw.TextStyle(fontSize: 8)),
         pw.Text('Fecha: ${dateFormat.format(DateTime.parse(args.nota.regtimestamp))}', style: const pw.TextStyle(fontSize: 8)),
         pw.Text('Vendedor: ${args.nombreVendedor}', style: const pw.TextStyle(fontSize: 8)),
         pw.Divider(height: 10, thickness: 0.5),
+        pw.Text('Cliente: ${args.nota.nombreCliente}', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8)),
+        pw.Text('ID: ${args.nota.idcliente}', style: const pw.TextStyle(fontSize: 8)),
+        pw.Divider(height: 10, thickness: 0.5),
 
         // -- Encabezado de productos --
         pw.Row(
           children: [
-            pw.Expanded(flex: 1, child: pw.Text('Cant', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8))),
+            pw.Expanded(flex: 2, child: pw.Text('Cant', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8))),
             pw.Expanded(flex: 5, child: pw.Text('Producto', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8))),
-            pw.Expanded(flex: 2, child: pw.Text('Importe', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8), textAlign: pw.TextAlign.right)),
+            pw.Expanded(flex: 3, child: pw.Text('P/U', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8), textAlign: pw.TextAlign.right)),
+            pw.Expanded(flex: 3, child: pw.Text('Importe', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8), textAlign: pw.TextAlign.right)),
           ],
         ),
         pw.Divider(thickness: 0.5, color: PdfColors.black),
@@ -568,9 +584,10 @@ class NotaVentaPdf extends pw.StatelessWidget {
           child: pw.Row(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              pw.Expanded(flex: 1, child: pw.Text(item.cantidad.toStringAsFixed(0), style: const pw.TextStyle(fontSize: 8))),
+              pw.Expanded(flex: 2, child: pw.Text(item.cantidad.toStringAsFixed(0), style: const pw.TextStyle(fontSize: 8))),
               pw.Expanded(flex: 5, child: pw.Text(item.nombreProducto, style: const pw.TextStyle(fontSize: 8))),
-              pw.Expanded(flex: 2, child: pw.Text(currencyFormat.format(item.total), style: const pw.TextStyle(fontSize: 8), textAlign: pw.TextAlign.right)),
+              pw.Expanded(flex: 3, child: pw.Text(currencyFormat.format(item.precio), style: const pw.TextStyle(fontSize: 8), textAlign: pw.TextAlign.right)),
+              pw.Expanded(flex: 3, child: pw.Text(currencyFormat.format(item.total), style: const pw.TextStyle(fontSize: 8), textAlign: pw.TextAlign.right)),
             ],
           ),
         )),
@@ -610,12 +627,17 @@ class ReciboPagoPdf extends pw.StatelessWidget {
       children: [
         pw.Center(child: pw.Text(empresa.nombre, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10))),
         pw.Center(child: pw.Text(empresa.direccion, style: const pw.TextStyle(fontSize: 8), textAlign: pw.TextAlign.center)),
-        pw.Center(child: pw.Text('Tel: ${empresa.telefono}', style: const pw.TextStyle(fontSize: 8))),
+        if (empresa.telefono.isNotEmpty && empresa.telefono != 'N/A')
+          pw.Center(child: pw.Text('Tel: ${empresa.telefono}', style: const pw.TextStyle(fontSize: 8))),
         pw.Divider(height: 10, thickness: 0.5),
         pw.Center(child: pw.Text('RECIBO DE PAGO', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9))),
         pw.Divider(height: 10, thickness: 0.5),
         pw.Text('Nota: #${args.nota.idnota}', style: const pw.TextStyle(fontSize: 8)),
         pw.Text('Fecha: ${dateFormat.format(DateTime.parse(args.nota.regtimestamp))}', style: const pw.TextStyle(fontSize: 8)),
+        pw.Text('Vendedor: ${args.nombreVendedor}', style: const pw.TextStyle(fontSize: 8)),
+        pw.Divider(height: 10, thickness: 0.5),
+        pw.Text('Cliente: ${args.nota.nombreCliente}', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8)),
+        pw.Text('ID: ${args.nota.idcliente}', style: const pw.TextStyle(fontSize: 8)),
         pw.Divider(height: 10, thickness: 0.5),
         _buildInfoRow('Forma de pago:', args.formaDePago),
         pw.SizedBox(height: 4),

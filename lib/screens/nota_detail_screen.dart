@@ -353,10 +353,28 @@ class _NotaDetailScreenState extends State<NotaDetailScreen> {
             final Map<String, dynamic> data = decoded['data'];
             final List<dynamic> detallesData = data['detalles'];
             final String vendedorNombre = data['vendedor']?['nombre'] ?? 'No asignado';
+            final Map<String, dynamic>? clienteData = data['cliente'];
 
             setState(() {
               _detalles = detallesData.map((json) => NotaDetalle.fromJson(json)).toList();
               _nombreVendedor = vendedorNombre;
+              
+              // Actualizar los datos del cliente en la nota actual para reflejar lo que dice el servidor
+              if (clienteData != null) {
+                _notaActual = Nota(
+                  idnota: _notaActual.idnota,
+                  idcliente: clienteData['id'] ?? _notaActual.idcliente,
+                  nombreCliente: clienteData['nombre'] ?? _notaActual.nombreCliente,
+                  total: _notaActual.total,
+                  saldo: _notaActual.saldo,
+                  regtimestamp: _notaActual.regtimestamp,
+                  idalmacen: _notaActual.idalmacen,
+                  nombreAlmacenSalida: _notaActual.nombreAlmacenSalida,
+                  nombreAlmacenOrigen: _notaActual.nombreAlmacenOrigen,
+                  montoPagadoAcumulado: _notaActual.montoPagadoAcumulado,
+                  nombreVendedor: _notaActual.nombreVendedor,
+                );
+              }
             });
             // Sincronizar detalles y pagos en segundo plano
             await _saveDetallesToOffline(_detalles);
@@ -747,6 +765,8 @@ class _NotaDetailScreenState extends State<NotaDetailScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(_notaActual.nombreCliente, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Text('ID Cliente: ${_notaActual.idcliente}', style: const TextStyle(fontSize: 14, color: Colors.grey)),
               const SizedBox(height: 12),
               // ---- INICIO DEL COMBO DE ALMACÉN ----
               DropdownButtonFormField<int>(

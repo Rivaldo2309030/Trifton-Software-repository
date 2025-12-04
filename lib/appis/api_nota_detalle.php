@@ -16,10 +16,11 @@ try {
 
     $idnota = intval($_GET['idnota']);
 
-    // 1. Buscar el ID del embarque y el ID del usuario asociado a la nota
-    $sql_get_info = "SELECT e.idfolioembarque, e.idusuario 
+    // 1. Buscar información de la nota, embarque y cliente
+    $sql_get_info = "SELECT e.idfolioembarque, e.idusuario, n.idcliente, c.nombrecliente 
                      FROM notas n
                      JOIN embarque e ON n.idembarque = e.idfolioembarque
+                     JOIN clientes c ON n.idcliente = c.idcliente
                      WHERE n.idnota = ?";
     
     $stmt_get_info = $conn->prepare($sql_get_info);
@@ -37,11 +38,13 @@ try {
     $stmt_get_info->close();
 
     if (!$info) {
-        throw new Exception("La nota #$idnota no tiene un embarque asociado o no existe.", 404);
+        throw new Exception("La nota #$idnota no tiene un embarque/cliente asociado o no existe.", 404);
     }
 
     $id_embarque = $info['idfolioembarque'];
     $id_usuario = $info['idusuario'];
+    $id_cliente = $info['idcliente'];
+    $nombre_cliente = $info['nombrecliente'];
 
     if (empty($id_usuario)) {
         throw new Exception("El embarque #$id_embarque asociado a la nota no tiene un idusuario asignado.", 404);
@@ -67,7 +70,7 @@ try {
     $stmt_vendedor->close();
 
     // 3. Obtener los detalles del embarque
-    $sql_detalles = "SELECT ed.iddetalle, ed.cantidad, ed.preciounitario AS precio, ed.subtotal AS total, ed.idestatus, p.nombreproducto, u.nombreunidad
+    $sql_detalles = "SELECT ed.iddetalle, ed.cantidad, ed.preciounitario, ed.subtotal, ed.idestatus, p.nombreproducto, u.nombreunidad
                      FROM embarque_detalle AS ed
                      JOIN productos AS p ON ed.idproducto = p.idproducto
                      JOIN unidades AS u ON ed.idunidad = u.idunidad
@@ -86,7 +89,16 @@ try {
     $result_detalles = $stmt_detalles->get_result();
     $detalles = [];
     while ($row = $result_detalles->fetch_assoc()) {
-        $detalles[] = $row;
+        // Renombrar claves para que coincidan con el frontend
+        $detalles[] = [
+            'iddetalle' => $row['iddetalle'],
+            'cantidad' => $row['cantidad'],
+            'precio' => $row['preciounitario'], // Frontend espera 'precio'
+            'total' => $row['subtotal'],       // Frontend espera 'total'
+            'idestatus' => $row['idestatus'],
+            'nombreproducto' => $row['nombreproducto'],
+            'nombreunidad' => $row['nombreunidad'],
+        ];
     }
     $stmt_detalles->close();
     
@@ -95,6 +107,10 @@ try {
         'detalles' => $detalles,
         'vendedor' => [
             'nombre' => $nombre_vendedor
+        ],
+        'cliente' => [
+            'id' => $id_cliente,
+            'nombre' => $nombre_cliente
         ]
     ];
 
