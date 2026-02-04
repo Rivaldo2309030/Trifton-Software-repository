@@ -148,7 +148,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(4.0), // Ajusta el padding si es necesario
                 child: Image.asset(
-                  'assets/img/logo_triton_principal.png',
+                  'assets/img/launcher3.png',
                   fit: BoxFit.cover,
                 ),
               ),

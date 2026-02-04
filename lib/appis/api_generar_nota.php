@@ -89,7 +89,7 @@ try {
     $stmt_nota->close();
 
     // 5. Preparar la inserción para `nota_detalle`
-    $sql_detalle = "INSERT INTO nota_detalle (idnota, idproducto, idunidad, precio, total) VALUES (?, ?, ?, ?, ?)";
+    $sql_detalle = "INSERT INTO nota_detalle (idnota, idproducto, idunidad, precio, total, tipo_producto) VALUES (?, ?, ?, ?, ?, ?)";
     $stmt_detalle = $conn->prepare($sql_detalle);
 
     // 6. Iterar y guardar los detalles de la nota
@@ -97,13 +97,15 @@ try {
         $cantidad = (float)$detalle['cantidad'];
         $precio = (float)$detalle['precio'];
         $subtotal_detalle = $cantidad * $precio;
+        $tipo_producto = isset($detalle['tipo_producto']) ? $detalle['tipo_producto'] : 'P'; // Default a 'P'
 
-        $stmt_detalle->bind_param("iiidd", 
+        $stmt_detalle->bind_param("iiidds", 
             $idnota, 
             $detalle['idproducto'], 
             $detalle['idunidad'], 
             $precio, 
-            $subtotal_detalle
+            $subtotal_detalle,
+            $tipo_producto
         );
         $stmt_detalle->execute();
     }

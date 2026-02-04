@@ -17,7 +17,7 @@ try {
     $idnota = intval($_GET['idnota']);
 
     // 1. Buscar información de la nota, embarque y cliente
-    $sql_get_info = "SELECT e.idfolioembarque, e.idusuario, n.idcliente, c.nombrecliente 
+    $sql_get_info = "SELECT e.idfolioembarque, e.idusuario, n.idcliente, c.nombrecliente AS nombre_cliente
                      FROM notas n
                      JOIN embarque e ON n.idembarque = e.idfolioembarque
                      JOIN clientes c ON n.idcliente = c.idcliente
@@ -44,7 +44,7 @@ try {
     $id_embarque = $info['idfolioembarque'];
     $id_usuario = $info['idusuario'];
     $id_cliente = $info['idcliente'];
-    $nombre_cliente = $info['nombrecliente'];
+    $nombre_cliente = $info['nombre_cliente'];
 
     if (empty($id_usuario)) {
         throw new Exception("El embarque #$id_embarque asociado a la nota no tiene un idusuario asignado.", 404);
@@ -70,7 +70,7 @@ try {
     $stmt_vendedor->close();
 
     // 3. Obtener los detalles del embarque
-    $sql_detalles = "SELECT ed.iddetalle, ed.cantidad, ed.preciounitario, ed.subtotal, ed.idestatus, p.nombreproducto, u.nombreunidad
+    $sql_detalles = "SELECT ed.iddetalle, ed.cantidad, ed.preciounitario, ed.subtotal, ed.idestatus, ed.tipo_producto, p.nombreproducto, u.nombreunidad
                      FROM embarque_detalle AS ed
                      JOIN productos AS p ON ed.idproducto = p.idproducto
                      JOIN unidades AS u ON ed.idunidad = u.idunidad
@@ -98,6 +98,7 @@ try {
             'idestatus' => $row['idestatus'],
             'nombreproducto' => $row['nombreproducto'],
             'nombreunidad' => $row['nombreunidad'],
+            'tipo_producto' => $row['tipo_producto'], // Nuevo
         ];
     }
     $stmt_detalles->close();

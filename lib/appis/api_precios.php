@@ -26,24 +26,39 @@ if ($conn->connect_error) {
     die(json_encode(['error' => "Connection failed: " . $conn->connect_error]));
 }
 
-// Consulta para obtener el precio específico
-$sql = "SELECT preciounitario FROM precios WHERE idcliente = ? AND idproducto = ? AND idunidad = ? AND estado = 1";
+// Consulta para obtener el precio específico con fallback
+$preciounitario = null;
 
-$stmt = $conn->prepare($sql);
-$stmt->bind_param("iii", $idcliente, $idproducto, $idunidad);
-$stmt->execute();
-$result = $stmt->get_result();
+// Intento 1: Buscar precio para el cliente específico
+$sql_specific = "SELECT preciounitario FROM precios WHERE idcliente = ? AND idproducto = ? AND idunidad = ? AND estado = 1";
+$stmt_specific = $conn->prepare($sql_specific);
+$stmt_specific->bind_param("iii", $idcliente, $idproducto, $idunidad);
+$stmt_specific->execute();
+$result_specific = $stmt_specific->get_result();
 
-$response = ['preciounitario' => null];
+if ($result_specific->num_rows > 0) {
+    $row = $result_specific->fetch_assoc();
+    $preciounitario = (float)$row['preciounitario'];
+} else {
+    // Intento 2: Si no se encontró, buscar precio para el cliente MOSTRADOR (idcliente = 0)
+    $idcliente_mostrador = 91; // ID del cliente MOSTRADOR
+    $sql_mostrador = "SELECT preciounitario FROM precios WHERE idcliente = ? AND idproducto = ? AND idunidad = ? AND estado = 1";
+    $stmt_mostrador = $conn->prepare($sql_mostrador);
+    $stmt_mostrador->bind_param("iii", $idcliente_mostrador, $idproducto, $idunidad);
+    $stmt_mostrador->execute();
+    $result_mostrador = $stmt_mostrador->get_result();
 
-if ($result->num_rows > 0) {
-    $row = $result->fetch_assoc();
-    $response['preciounitario'] = (float)$row['preciounitario'];
+    if ($result_mostrador->num_rows > 0) {
+        $row = $result_mostrador->fetch_assoc();
+        $preciounitario = (float)$row['preciounitario'];
+    }
+    $stmt_mostrador->close();
 }
+$stmt_specific->close();
+
+$response = ['preciounitario' => $preciounitario];
 
 http_response_code(200);
 echo json_encode($response);
 
-$stmt->close();
-$conn->close();
-?>
+$conn->close();?>

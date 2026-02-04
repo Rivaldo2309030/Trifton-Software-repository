@@ -182,6 +182,12 @@ class _SyncScreenState extends State<SyncScreen> {
       final response = await http.post(url, headers: {'Content-Type': 'application/json; charset=UTF-8'}, body: jsonEncode(payload)).timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 201) {
+        final responseData = json.decode(response.body);
+        final int newServerId = responseData['idfolioembarque'];
+
+        // ACTUALIZAR PAGOS PENDIENTES QUE REFERENCIABAN AL ID LOCAL
+        await db.updatePagosToNewNoteId(localId, newServerId);
+
         await db.deleteLocalEmbarque(localId);
         return true;
       } else {
@@ -217,6 +223,13 @@ class _SyncScreenState extends State<SyncScreen> {
           embarquesExitosos++;
         }
       }
+    }
+
+    // Recargar pagos desde BD para asegurar que tengan los IDs de notas actualizados (FKs)
+    if (_unsyncedPagos.isNotEmpty) {
+      final db = DatabaseHelper.instance;
+      // Actualizamos la lista en memoria con los IDs corregidos por _subirEmbarque
+      _unsyncedPagos = await db.getPagosParaSincronizar();
     }
 
     // Subir Pagos
@@ -368,14 +381,42 @@ class _SyncScreenState extends State<SyncScreen> {
 
   Widget _buildPagoItem(Map<String, dynamic> pago) {
     final currencyFormat = NumberFormat.currency(locale: 'es_MX', symbol: '\$');
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      elevation: 4,
-      child: ListTile(
-        leading: const Icon(Icons.monetization_on_outlined, color: Colors.green, size: 40),
-        title: Text('Pago para Nota #${pago['idnota']}'),
-        subtitle: Text('Monto: ${currencyFormat.format(pago['monto'])} \nFecha: ${_formatTimestamp(pago['regtimestamp'])}'),
-        isThreeLine: true,
+    return Dismissible(
+      key: Key('pago_${pago['id_pago_local']}'),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        color: Colors.red,
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        child: const Icon(Icons.delete, color: Colors.white, size: 30),
+      ),
+      confirmDismiss: (direction) async {
+        return await showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Eliminar Pago'),
+            content: const Text('¿Estás seguro de eliminar este pago pendiente? Se perderá permanentemente.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('CANCELAR')),
+              TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('ELIMINAR', style: TextStyle(color: Colors.red))),
+            ],
+          ),
+        );
+      },
+      onDismissed: (direction) async {
+        await DatabaseHelper.instance.deletePagoPorSincronizar(pago['id_pago_local']);
+        _loadUnsyncedData();
+        _showInfoSnackBar('Pago eliminado localmente.');
+      },
+      child: Card(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        elevation: 4,
+        child: ListTile(
+          leading: const Icon(Icons.monetization_on_outlined, color: Colors.green, size: 40),
+          title: Text('Pago para Nota #${pago['idnota']}'),
+          subtitle: Text('Monto: ${currencyFormat.format(pago['monto'])} \nFecha: ${_formatTimestamp(pago['regtimestamp'])}'),
+          isThreeLine: true,
+        ),
       ),
     );
   }

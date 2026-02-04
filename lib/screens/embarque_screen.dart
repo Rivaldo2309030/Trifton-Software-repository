@@ -14,41 +14,57 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 class Estatus {
   final int id;
   final String clave;
+
   Estatus({required this.id, required this.clave});
 
   factory Estatus.fromJson(Map<String, dynamic> json) {
     return Estatus(
-      id: int.tryParse(json['idestatus'].toString()) ?? 0,
+      id: int.tryParse(json['idestatus']?.toString() ?? '0') ?? 0,
       clave: json['clave'] ?? 'N/A',
     );
   }
 }
 
-class EmbarqueDetalleProducto {
-  final int iddetalle;
-  final String nombreproducto;
-  final double cantidad;
-  int idestatus; // Mutable
-  final int idproducto;
-  final int idunidad;
+class EmbarqueConsulta {
+  final int idfolioembarque;
+  final String regtimestamp;
+  final String nombreCliente;
+  final String nombreusuario;
+  final String nombreAlmacenista;
+  final bool esActivo;
+  final int idcliente;
+  final int idalmacen;
+  final int idusuario;
+  final int idalmacenista;
+  final int tipoVenta;
 
-  EmbarqueDetalleProducto({
-    required this.iddetalle,
-    required this.nombreproducto,
-    required this.cantidad,
-    required this.idestatus,
-    required this.idproducto,
-    required this.idunidad,
+  EmbarqueConsulta({
+    required this.idfolioembarque,
+    required this.regtimestamp,
+    required this.nombreCliente,
+    required this.nombreusuario,
+    required this.nombreAlmacenista,
+    required this.esActivo,
+    required this.idcliente,
+    required this.idalmacen,
+    required this.idusuario,
+    required this.idalmacenista,
+    required this.tipoVenta,
   });
 
-  factory EmbarqueDetalleProducto.fromJson(Map<String, dynamic> json) {
-    return EmbarqueDetalleProducto(
-      iddetalle: int.tryParse(json['iddetalle'].toString()) ?? 0,
-      nombreproducto: json['nombreproducto'] ?? 'N/A',
-      cantidad: (json['cantidad'] as num).toDouble(),
-      idestatus: int.tryParse(json['idestatus'].toString()) ?? 0,
-      idproducto: int.tryParse(json['idproducto'].toString()) ?? 0,
-      idunidad: int.tryParse(json['idunidad'].toString()) ?? 0,
+  factory EmbarqueConsulta.fromJson(Map<String, dynamic> json) {
+    return EmbarqueConsulta(
+      idfolioembarque: int.tryParse(json['idfolioembarque'].toString()) ?? 0,
+      regtimestamp: json['regtimestamp'] ?? '',
+      nombreCliente: json['nombrecliente'] ?? json['nombre_cliente'] ?? 'N/A',
+      nombreusuario: json['nombreusuario'] ?? 'N/A',
+      nombreAlmacenista: json['nombre_almacenista'] ?? json['nombrealmacenista'] ?? 'N/A',
+      esActivo: (int.tryParse(json['estado_embarque']?.toString() ?? '0') ?? 0) == 1,
+      idcliente: int.tryParse(json['idcliente']?.toString() ?? '0') ?? 0,
+      idalmacen: int.tryParse(json['idalmacen']?.toString() ?? '0') ?? 0,
+      idusuario: int.tryParse(json['idusuario']?.toString() ?? '0') ?? 0,
+      idalmacenista: int.tryParse(json['idalmacenista']?.toString() ?? '0') ?? 0,
+      tipoVenta: int.tryParse(json['tipo_venta']?.toString() ?? '1') ?? 1,
     );
   }
 }
@@ -160,53 +176,8 @@ class Producto {
   }
 }
 
-final Set<int> _selectedEmbarques = {};
+// (duplicate/ malformed block removed) EmbarqueConsulta is defined above.
 
-// --- Modelo para la pestaña de Consulta (Actualizado) ---
-class EmbarqueConsulta {
-  final int idfolioembarque;
-  final String regtimestamp;
-  final String nombre_cliente;
-  final String nombreusuario;
-  final String nombre_almacenista;
-  final bool esActivo;
-  bool _selectAll = false;
-  // IDs añadidos
-  final int idcliente;
-  final int idalmacen;
-  final int idusuario;
-  final int idalmacenista; // Nuevo: ID del almacenista
-
-  EmbarqueConsulta({
-    required this.idfolioembarque,
-    required this.regtimestamp,
-    required this.nombre_cliente,
-    required this.nombreusuario,
-    required this.nombre_almacenista,
-    required this.esActivo,
-    required this.idcliente,
-    required this.idalmacen,
-    required this.idusuario,
-    required this.idalmacenista, // Nuevo
-  });
-
-  factory EmbarqueConsulta.fromJson(Map<String, dynamic> json) {
-    return EmbarqueConsulta(
-      idfolioembarque: int.tryParse(json['idfolioembarque'].toString()) ?? 0,
-      regtimestamp: json['regtimestamp'] ?? '',
-      nombre_cliente: json['nombre_cliente'] ?? 'N/A',
-      nombreusuario: json['nombreusuario'] ?? 'N/A',
-      nombre_almacenista: json['nombre_almacenista'] ?? 'N/A',
-      esActivo: (int.tryParse(json['estado_embarque'].toString()) ?? 0) == 1,
-      // Parsear los nuevos IDs
-      idcliente: int.tryParse(json['idcliente'].toString()) ?? 0,
-      idalmacen: int.tryParse(json['idalmacen'].toString()) ?? 0,
-      idusuario: int.tryParse(json['idusuario'].toString()) ?? 0,
-      idalmacenista:
-          int.tryParse(json['idalmacenista'].toString()) ?? 0, // Nuevo
-    );
-  }
-}
 
 class EmbarqueScreen extends StatefulWidget {
   const EmbarqueScreen({super.key});
@@ -244,11 +215,12 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
   int? _selectedAlmacenistaId;
   int? _selectedUnidadId;
   int? _selectedClienteId;
-  int _rowsPerPage = 10;
+  int _selectedTipoVenta = 1; // 0 = Contado, 1 = Crédito (por defecto)
+  final int _rowsPerPage = 10;
   int _currentPage = 0;
   bool _selectAll = false; // para saber si el header está marcado
-  final Set<int> _selectedEmbarques =
-      {}; // aquí guardamos los folios seleccionados
+  final Set<int> _selectedEmbarques = {}; // aquí guardamos los folios seleccionados
+
 
   String? _nombreAlmacenFiltro() {
     if (_selectedAlmacenFiltroId == null) return null;
@@ -265,6 +237,8 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
   // --- ESTADO PARA NUEVA SELECCION DE PRODUCTOS ---
   Producto? _selectedProducto;
   double? _precioUnitarioDinamico; // Para guardar el precio obtenido de la API
+  String _selectedTipoProducto = 'P'; // 'P' = Producto, 'C' = Caja
+
 
   // --- Controles para agregar producto ---
   final TextEditingController cantidadCtrl = TextEditingController(text: '1');
@@ -349,7 +323,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
         }
       }
     } catch (e) {
-      print('Error fetching estatus list: $e');
+      // print('Error fetching estatus list: $e');
     }
   }
 
@@ -474,16 +448,22 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
         if (mounted) setState(() => _almacenistas = almacenistas);
       }
     } on SocketException {
-      print("Sin conexión para sincronizar catálogos. Usando datos locales.");
+      // print("Sin conexión para sincronizar catálogos. Usando datos locales.");
       // Falla silenciosamente, los datos locales ya fueron cargados.
     } catch (e) {
-      print('Error en _syncCatalogsFromServer: $e');
+      // print('Error en _syncCatalogsFromServer: $e');
       // Opcional: mostrar un snackbar no intrusivo
       // _snack('No se pudieron sincronizar los catálogos.', color: Colors.orange);
     }
   }
 
   Future<void> _fetchPrecio() async {
+    // LOGICA ESPECIAL PARA CAJAS: Precio siempre es 1.0
+    if (_selectedTipoProducto == 'C') {
+      setState(() => _precioUnitarioDinamico = 1.0);
+      return;
+    }
+
     if (_selectedProducto == null ||
         _selectedClienteId == null ||
         _selectedUnidadId == null) {
@@ -544,11 +524,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
       }
     } on SocketException {
       if (localPrice == null) {
-        // Si no hay conexión y tampoco teníamos precio local
-        _snack(
-          'Sin conexión. Ingresa el precio manualmente.',
-          color: Colors.orange,
-        );
+        // Si no hay conexión y tampoco teníamos precio local, usamos 0.0 sin molestar al usuario
         setState(() => _precioUnitarioDinamico = 0.0);
       }
       // Si hay un precio local, simplemente se usa y no se muestra error.
@@ -619,6 +595,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
         'idproducto': _selectedProducto!.id,
         'idunidad': _selectedUnidadId,
         'idestatus': 1, // ID de estatus por defecto 'EE'
+        'tipo_producto': _selectedTipoProducto, // Nuevo campo
       });
 
       // Limpiar controles (parcialmente, según nuevo requerimiento)
@@ -674,7 +651,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
   Future<bool> _tieneInternet() async {
     // primero revisa si hay algún tipo de red
     final con = await Connectivity().checkConnectivity();
-    if (con == ConnectivityResult.none) return false;
+    if (con.contains(ConnectivityResult.none)) return false;
 
     // luego prueba que sí salga a internet
     try {
@@ -757,6 +734,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
             ) ??
             0.0,
         'idestatus': fila['idestatus'], // Añadido para el guardado
+        'tipo_producto': fila['tipo_producto'], // Nuevo campo
       };
     }).toList();
 
@@ -765,6 +743,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
       'idusuario': idUsuario, // ID de usuario obtenido de SharedPreferences
       'idalmacenista': _selectedAlmacenistaId,
       'idcliente': _selectedClienteId,
+      'tipo_venta': _selectedTipoVenta, // Nuevo campo
       'detalles': detallesPayload,
     };
   }
@@ -777,6 +756,9 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
 
     try {
       final dbHelper = DatabaseHelper.instance;
+      // Añadir la lógica para guardar tipo_venta y tipo_producto en la base de datos local
+      // Asegurarse de que el esquema local para embarque y embarque_detalle
+      // en DatabaseHelper.dart soporta estos nuevos campos.
       final id = await dbHelper.insertEmbarque(dataToSave);
       _snack(
         '✅ Embarque guardado localmente (ID: $id). Se sincronizará más tarde.',
@@ -785,7 +767,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
       _limpiarFormulario();
     } catch (e) {
       _snack('❌ Error al guardar localmente: $e', color: Colors.red);
-      print('Error en _guardarEmbarqueLocalmente: $e');
+      // print('Error en _guardarEmbarqueLocalmente: $e');
     }
   }
 
@@ -844,11 +826,11 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
       }
     } on SocketException catch (_) {
       if (kIsWeb || isEditing) {
-        print(
-          '🔌 Sin conexión. No se puede ${isEditing ? 'editar' : 'guardar en la web'}.',
-        );
+        // print(
+        //   '🔌 Sin conexión. No se puede ${isEditing ? 'editar' : 'guardar en la web'}.',
+        // );
       } else {
-        print('🔌 Sin conexión. Guardando localmente...');
+        // print('🔌 Sin conexión. Guardando localmente...');
         await _guardarEmbarqueLocalmente(payload: payload);
       }
     } catch (e) {
@@ -857,7 +839,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
         _snack(errorMessage, color: Colors.red);
       } else {
         _snack('$errorMessage Guardando localmente...', color: Colors.orange);
-        print('Error en _guardarEmbarqueEnServidor: $e');
+        // print('Error en _guardarEmbarqueEnServidor: $e');
         await _guardarEmbarqueLocalmente(payload: payload);
       }
     }
@@ -886,22 +868,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
 
       if (mounted) {
         setState(() {
-          _embarquesConsultados = offlineData
-              .map(
-                (m) => EmbarqueConsulta(
-                  idfolioembarque: m['idfolioembarque'] as int,
-                  regtimestamp: m['regtimestamp'] as String,
-                  nombre_cliente: m['nombre_cliente'] as String,
-                  nombreusuario: m['nombreusuario'] as String,
-                  nombre_almacenista: m['nombre_almacenista'] as String,
-                  esActivo: (m['estado_embarque'] as int) == 1,
-                  idcliente: m['idcliente'] as int,
-                  idalmacen: m['idalmacen'] as int,
-                  idusuario: m['idusuario'] as int,
-                  idalmacenista: m['idalmacenista'] as int,
-                ),
-              )
-              .toList();
+          _embarquesConsultados = offlineData.map((m) => _toEmbarqueConsulta(m)).toList();
           _isConsultando = false;
         });
       }
@@ -955,22 +922,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
 
       if (mounted) {
         setState(() {
-          _embarquesConsultados = offlineData
-              .map(
-                (m) => EmbarqueConsulta(
-                  idfolioembarque: m['idfolioembarque'] as int,
-                  regtimestamp: m['regtimestamp'] as String,
-                  nombre_cliente: m['nombre_cliente'] as String,
-                  nombreusuario: m['nombreusuario'] as String,
-                  nombre_almacenista: m['nombre_almacenista'] as String,
-                  esActivo: (m['estado_embarque'] as int) == 1,
-                  idcliente: m['idcliente'] as int,
-                  idalmacen: m['idalmacen'] as int,
-                  idusuario: m['idusuario'] as int,
-                  idalmacenista: m['idalmacenista'] as int,
-                ),
-              )
-              .toList();
+          _embarquesConsultados = offlineData.map((m) => _toEmbarqueConsulta(m)).toList();
           _currentPage = 0;
         });
       }
@@ -984,22 +936,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
       if (mounted) {
         _snack('Error al consultar embarques: $e', color: Colors.red);
         setState(() {
-          _embarquesConsultados = offlineData
-              .map(
-                (m) => EmbarqueConsulta(
-                  idfolioembarque: m['idfolioembarque'] as int,
-                  regtimestamp: m['regtimestamp'] as String,
-                  nombre_cliente: m['nombre_cliente'] as String,
-                  nombreusuario: m['nombreusuario'] as String,
-                  nombre_almacenista: m['nombre_almacenista'] as String,
-                  esActivo: (m['estado_embarque'] as int) == 1,
-                  idcliente: m['idcliente'] as int,
-                  idalmacen: m['idalmacen'] as int,
-                  idusuario: m['idusuario'] as int,
-                  idalmacenista: m['idalmacenista'] as int,
-                ),
-              )
-              .toList();
+          _embarquesConsultados = offlineData.map((m) => _toEmbarqueConsulta(m)).toList();
         });
       }
     } finally {
@@ -1011,133 +948,47 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
     }
   }
 
-  Future<void> _actualizarEstatusProducto(
-    int iddetalle,
-    int nuevoIdEstatus,
-  ) async {
-    final url = Uri.parse(
-      '${ApiConfig.baseUrl}api_cambiar_estatus_producto.php',
-    );
-    try {
-      final response = await http.post(
-        url,
-        headers: {'Content-Type': 'application/json; charset=UTF-8'},
-        body: jsonEncode({'iddetalle': iddetalle, 'idestatus': nuevoIdEstatus}),
+  EmbarqueConsulta _toEmbarqueConsulta(dynamic m) {
+    if (m is EmbarqueConsulta) return m;
+    if (m is Map<String, dynamic>) {
+      final idfolio = (m['idfolioembarque'] ?? m['idfolio_embarque']) as int? ?? 0;
+      final regtimestamp = (m['regtimestamp'] ?? m['reg_timestamp'] ?? '') as String;
+      final nombreCliente = (m['nombre_cliente'] ?? m['nombrecliente']) as String? ?? 'N/A';
+      final nombreusuario = (m['nombreusuario'] ?? m['nombre_usuario']) as String? ?? 'N/A';
+      final nombreAlmacenista = (m['nombre_almacenista'] ?? m['nombrealmacenista']) as String? ?? 'N/A';
+      final esActivo = ((m['estado_embarque'] ?? m['esActivo']) as int? ?? 0) == 1;
+      final idcliente = (m['idcliente'] ?? 0) as int;
+      final idalmacen = (m['idalmacen'] ?? 0) as int;
+      final idusuario = (m['idusuario'] ?? 0) as int;
+      final idalmacenista = (m['idalmacenista'] ?? 0) as int;
+      final tipoVenta = (m['tipo_venta'] ?? 1) as int;
+      return EmbarqueConsulta(
+        idfolioembarque: idfolio,
+        regtimestamp: regtimestamp,
+        nombreCliente: nombreCliente,
+        nombreusuario: nombreusuario,
+        nombreAlmacenista: nombreAlmacenista,
+        esActivo: esActivo,
+        idcliente: idcliente,
+        idalmacen: idalmacen,
+        idusuario: idusuario,
+        idalmacenista: idalmacenista,
+        tipoVenta: tipoVenta,
       );
-      if (response.statusCode == 200) {
-        final decoded = json.decode(response.body);
-        if (decoded['status'] == 'success') {
-          _snack('Estatus actualizado.', color: Colors.green);
-        } else {
-          throw Exception(decoded['message'] ?? 'Error al actualizar');
-        }
-      } else {
-        throw Exception('Error del servidor: ${response.statusCode}');
-      }
-    } catch (e) {
-      _snack('Error: $e', color: Colors.red);
     }
-  }
-
-  void _mostrarDialogoDetalles(EmbarqueConsulta embarque) async {
-    // Muestra un loader mientras se cargan los detalles
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(child: CircularProgressIndicator()),
-    );
-
-    List<EmbarqueDetalleProducto> detalles = [];
-    try {
-      final url = Uri.parse(
-        '${ApiConfig.baseUrl}api_embarque_detalle.php?idfolioembarque=${embarque.idfolioembarque}',
-      );
-      final response = await http.get(url);
-      Navigator.of(context).pop(); // Cierra el loader
-
-      if (response.statusCode == 200) {
-        final decoded = json.decode(response.body);
-        if (decoded['success'] == true) {
-          final List<dynamic> data = decoded['data'];
-          detalles = data
-              .map((json) => EmbarqueDetalleProducto.fromJson(json))
-              .toList();
-        } else {
-          throw Exception(decoded['error'] ?? 'Error al cargar detalles');
-        }
-      } else {
-        throw Exception('Error de conexión: ${response.statusCode}');
-      }
-    } catch (e) {
-      Navigator.of(
-        context,
-      ).pop(); // Asegúrate de cerrar el loader en caso de error
-      _snack('Error al cargar detalles: $e', color: Colors.red);
-      return;
-    }
-
-    // Muestra el diálogo con los detalles
-    showDialog(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setStateInDialog) {
-            return AlertDialog(
-              title: Text('Detalle del Embarque #${embarque.idfolioembarque}'),
-              content: SizedBox(
-                width: double.maxFinite,
-                child: _estatusList.isEmpty
-                    ? const Center(
-                        child: Text('Cargando configuración de estatus...'),
-                      )
-                    : ListView.builder(
-                        shrinkWrap: true,
-                        itemCount: detalles.length,
-                        itemBuilder: (context, index) {
-                          final producto = detalles[index];
-                          return Card(
-                            margin: const EdgeInsets.symmetric(vertical: 4),
-                            child: ListTile(
-                              title: Text(producto.nombreproducto),
-                              subtitle: Text('Cantidad: ${producto.cantidad}'),
-                              trailing: DropdownButton<int>(
-                                value: producto.idestatus,
-                                items: _estatusList.map((estatus) {
-                                  return DropdownMenuItem<int>(
-                                    value: estatus.id,
-                                    child: Text(estatus.clave),
-                                  );
-                                }).toList(),
-                                onChanged: (newId) {
-                                  if (newId != null &&
-                                      newId != producto.idestatus) {
-                                    _actualizarEstatusProducto(
-                                      producto.iddetalle,
-                                      newId,
-                                    ).then((_) {
-                                      // Actualiza el estado localmente para reflejar el cambio en la UI
-                                      setStateInDialog(() {
-                                        producto.idestatus = newId;
-                                      });
-                                    });
-                                  }
-                                },
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('CERRAR'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+    // Fallback: return empty placeholder
+    return EmbarqueConsulta(
+      idfolioembarque: 0,
+      regtimestamp: '',
+      nombreCliente: 'N/A',
+      nombreusuario: 'N/A',
+      nombreAlmacenista: 'N/A',
+      esActivo: false,
+      idcliente: 0,
+      idalmacen: 0,
+      idusuario: 0,
+      idalmacenista: 0,
+      tipoVenta: 1,
     );
   }
 
@@ -1172,20 +1023,23 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
         '${ApiConfig.baseUrl}api_embarque_detalle.php?idfolioembarque=${embarque.idfolioembarque}',
       );
       final detallesResponse = await http.get(detallesUrl);
-      if (detallesResponse.statusCode != 200)
+      if (detallesResponse.statusCode != 200) {
         throw Exception('Error al obtener detalles del embarque.');
+      }
 
       final detallesDecoded = json.decode(detallesResponse.body);
-      if (detallesDecoded['success'] != true)
+      if (detallesDecoded['success'] != true) {
         throw Exception(
           detallesDecoded['error'] ?? 'Error del servidor al obtener detalles.',
         );
+      }
 
       final List<dynamic> detallesData = detallesDecoded['data'];
-      if (detallesData.isEmpty)
+      if (detallesData.isEmpty) {
         throw Exception(
           'Este embarque no tiene productos para generar una nota.',
         );
+      }
 
       // 2. Build the payload for the nota API - USANDO EL ALMACEN ORIGINAL DEL EMBARQUE
       final payload = {
@@ -1201,6 +1055,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
                 'idunidad': d['idunidad'],
                 'cantidad': d['cantidad'],
                 'precio': d['preciounitario'],
+                'tipo_producto': d['tipo_producto'], // <-- CORRECCIÓN
               },
             )
             .toList(),
@@ -1223,9 +1078,9 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
               final dbHelper = DatabaseHelper.instance;
               await dbHelper
                   .insertNotaOffline(notaDecoded['nota'] as Map<String, dynamic>);
-              print('Nueva nota insertada en la base de datos local.');
+              // print('Nueva nota insertada en la base de datos local.');
             } catch (e) {
-              print('Error al guardar la nota localmente: $e');
+              // print('Error al guardar la nota localmente: $e');
               // Opcional: notificar al usuario que la nota se generó pero no se pudo mostrar localmente.
             }
           }
@@ -1243,7 +1098,13 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
         }
       }
     } catch (e) {
-      if (mounted) _snack('❌ Error: $e', color: Colors.red);
+      if (mounted) {
+        String errorMsg = '❌ Error: $e';
+        if (e.toString().contains('SocketException') || e.toString().contains('Failed host lookup')) {
+          errorMsg = '🔌 No hay conexión a internet. No se puede generar la nota en este momento.';
+        }
+        _snack(errorMsg, color: Colors.red);
+      }
     } finally {
       if (mounted) setState(() => _isConsultando = false);
     }
@@ -1470,6 +1331,27 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
                                               _fetchPrecio();
                                             },
                                           ),
+                                          SizedBox(
+                                            width: constraints.maxWidth,
+                                            child: _buildDropdown(
+                                              label: 'Tipo de Venta',
+                                              icon: Icons.credit_card_outlined,
+                                              value: _selectedTipoVenta,
+                                              items: const [
+                                                DropdownMenuItem<int>(
+                                                  value: 1,
+                                                  child: Text('Crédito'),
+                                                ),
+                                                DropdownMenuItem<int>(
+                                                  value: 0,
+                                                  child: Text('Contado'),
+                                                ),
+                                              ],
+                                              onChanged: (v) => setState(
+                                                () => _selectedTipoVenta = v!,
+                                              ),
+                                            ),
+                                          ),
                                         ],
                                       );
                                     },
@@ -1624,6 +1506,35 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
                                                           _selectedUnidadId = v,
                                                     );
                                                     _fetchPrecio();
+                                                  },
+                                                ),
+                                              ),
+                                              // Tipo de Producto Dropdown
+                                              SizedBox(
+                                                width: isSmall
+                                                    ? (c.maxWidth * 0.60)
+                                                    : c.maxWidth * 0.50,
+                                                child: _buildDropdown<String>(
+                                                  label: 'Tipo',
+                                                  icon: Icons.category_outlined,
+                                                  value: _selectedTipoProducto,
+                                                  items: const [
+                                                    DropdownMenuItem<String>(
+                                                      value: 'P',
+                                                      child: Text('Producto'),
+                                                    ),
+                                                    DropdownMenuItem<String>(
+                                                      value: 'C',
+                                                      child: Text('Caja'),
+                                                    ),
+                                                  ],
+                                                  onChanged: (v) {
+                                                    if (v != null) {
+                                                      setState(() =>
+                                                          _selectedTipoProducto =
+                                                              v);
+                                                      _fetchPrecio(); // Recalcular precio al cambiar tipo
+                                                    }
                                                   },
                                                 ),
                                               ),
@@ -1988,7 +1899,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
     required void Function(T?) onChanged,
   }) {
     return DropdownButtonFormField<T>(
-      value: value,
+      initialValue: value,
       decoration: InputDecoration(
         labelText: label,
         prefixIcon: Icon(icon),
@@ -2057,7 +1968,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
         elevation: 3,
         padding: const EdgeInsets.symmetric(vertical: 14),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        shadowColor: Colors.black.withOpacity(0.25),
+        shadowColor: Colors.black.withAlpha(64),
       ),
     );
   }
@@ -2080,7 +1991,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
           borderRadius: BorderRadius.circular(14),
           side: BorderSide(color: border, width: 1.2),
         ),
-        shadowColor: Colors.black.withOpacity(0.25),
+        shadowColor: Colors.black.withAlpha(64),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -2167,7 +2078,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
                 children: [
                   Expanded(
                     child: DropdownButtonFormField<int>(
-                      value: _selectedAlmacenFiltroId,
+                      initialValue: _selectedAlmacenFiltroId,
                       isExpanded: true,
                       decoration: InputDecoration(
                         isDense: true,
@@ -2282,6 +2193,7 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
         _selectedAlmacenistaId =
             embarque.idalmacenista; // Ahora sí viene en EmbarqueConsulta
         _selectedClienteId = embarque.idcliente;
+        _selectedTipoVenta = embarque.tipoVenta; // Nuevo: setear tipo de venta
         _selectedUnidadId = null; // La unidad es por producto, no de cabecera
 
         // Poblar la tabla de productos (filas)
@@ -2473,9 +2385,9 @@ class _EmbarqueScreenState extends State<EmbarqueScreen>
                   ),
                   DataCell(Text(embarque.idfolioembarque.toString())),
                   DataCell(Text(embarque.regtimestamp.split(' ').first)),
-                  DataCell(Text(embarque.nombre_cliente)),
+                  DataCell(Text(embarque.nombreCliente)),
                   DataCell(Text(embarque.nombreusuario)),
-                  DataCell(Text(embarque.nombre_almacenista)),
+                  DataCell(Text(embarque.nombreAlmacenista)),
                   DataCell(
                     Icon(
                       embarque.esActivo ? Icons.check_circle : Icons.cancel,

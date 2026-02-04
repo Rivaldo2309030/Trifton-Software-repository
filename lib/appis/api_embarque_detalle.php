@@ -22,6 +22,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
                     ed.idestatus, 
                     ed.idproducto, 
                     ed.idunidad,
+                    ed.tipo_producto,
                     p.nombreproducto, 
                     u.nombreunidad 
                 FROM 

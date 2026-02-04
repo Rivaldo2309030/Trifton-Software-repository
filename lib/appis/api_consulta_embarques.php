@@ -27,6 +27,7 @@ try {
             e.idalmacen,
             e.idusuario,
             e.idalmacenista, -- Añadido
+            e.tipo_venta, -- Nuevo: tipo de venta (Crédito/Contado)
             c.nombrecliente AS nombre_cliente,
             u.nombre AS nombreusuario,
             a.nombre AS nombre_almacenista

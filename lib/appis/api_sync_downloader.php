@@ -112,6 +112,7 @@ try {
                         d.regtimestamp,
                         d.estado,
                         COALESCE(ed.idestatus, 1) AS idestatus, -- Provide default value
+                        d.tipo_producto,
                         p.nombreproducto,
                         u.nombreunidad
                     FROM nota_detalle d

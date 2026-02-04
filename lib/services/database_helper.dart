@@ -8,7 +8,8 @@ import 'package:crypto/crypto.dart'; // For sha256
 
 class DatabaseHelper {
   static final _databaseName = "embarques.db";
-  static final _databaseVersion = 11; // <<< VERSION INCREMENTADA
+  static final _databaseVersion =
+      14; // <<< VERSION INCREMENTADA para añadir tipo_venta a embarques_consulta
 
   // --- Singleton ---
   DatabaseHelper._privateConstructor();
@@ -33,7 +34,37 @@ class DatabaseHelper {
       version: _databaseVersion,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
+      onOpen: _onOpen,
     );
+  }
+
+  Future<void> _onOpen(Database db) async {
+    // Ensure that critical columns exist even if the database version was not bumped
+    // (defensive: handle DBs that for some reason lack newer columns).
+    await _ensureEmbarquesConsultaColumns(db);
+  }
+
+  Future<void> _ensureEmbarquesConsultaColumns(Database db) async {
+    try {
+      final List<Map<String, dynamic>> cols = await db.rawQuery(
+        "PRAGMA table_info('embarques_consulta')",
+      );
+      final columnNames = cols.map((c) => c['name'] as String).toSet();
+      if (!columnNames.contains('tipo_venta')) {
+        try {
+          await db.execute(
+            'ALTER TABLE embarques_consulta ADD COLUMN tipo_venta INTEGER DEFAULT 1',
+          );
+          print(
+            'Añadida columna tipo_venta a embarques_consulta durante onOpen',
+          );
+        } catch (e) {
+          print('Error añadiendo tipo_venta en onOpen: $e');
+        }
+      }
+    } catch (e) {
+      print('Error verificando columnas de embarques_consulta en onOpen: $e');
+    }
   }
 
   Future _onCreate(Database db, int version) async {
@@ -45,6 +76,7 @@ class DatabaseHelper {
         idusuario INTEGER NOT NULL,
         idalmacenista INTEGER NOT NULL,
         idcliente INTEGER NOT NULL,
+        tipo_venta INTEGER NOT NULL DEFAULT 1, -- Nuevo campo
         regtimestamp TEXT NOT NULL,
         synced INTEGER NOT NULL DEFAULT 0
       )
@@ -59,6 +91,7 @@ class DatabaseHelper {
         cantidad REAL NOT NULL,
         preciounitario REAL NOT NULL,
         subtotal REAL NOT NULL,
+        tipo_producto TEXT NOT NULL DEFAULT 'P', -- Nuevo campo
         FOREIGN KEY (idfolioembarque_local_fk) REFERENCES embarque_offline (idfolioembarque_local) ON DELETE CASCADE
       )
     ''');
@@ -132,6 +165,7 @@ class DatabaseHelper {
         idestatus INTEGER,
         nombreproducto TEXT NOT NULL,
         nombreunidad TEXT NOT NULL,
+        tipo_producto TEXT NOT NULL DEFAULT 'P', -- Nuevo campo
         regtimestamp TEXT,
         estado INTEGER,
         FOREIGN KEY (idnota_fk) REFERENCES notas_offline (idnota) ON DELETE CASCADE
@@ -158,7 +192,8 @@ class DatabaseHelper {
         idcliente INTEGER,
         idalmacen INTEGER,
         idusuario INTEGER,
-        idalmacenista INTEGER
+        idalmacenista INTEGER,
+        tipo_venta INTEGER -- Nuevo campo
       )
     ''');
   }
@@ -306,12 +341,22 @@ class DatabaseHelper {
     // --- NUEVA MIGRACIÓN PARA v11 ---
     if (oldVersion < 11) {
       try {
-        await db.execute('ALTER TABLE nota_detalle_offline ADD COLUMN idproducto INTEGER');
-        await db.execute('ALTER TABLE nota_detalle_offline ADD COLUMN idunidad INTEGER');
-        await db.execute('ALTER TABLE nota_detalle_offline ADD COLUMN regtimestamp TEXT');
-        await db.execute('ALTER TABLE nota_detalle_offline ADD COLUMN estado INTEGER');
+        await db.execute(
+          'ALTER TABLE nota_detalle_offline ADD COLUMN idproducto INTEGER',
+        );
+        await db.execute(
+          'ALTER TABLE nota_detalle_offline ADD COLUMN idunidad INTEGER',
+        );
+        await db.execute(
+          'ALTER TABLE nota_detalle_offline ADD COLUMN regtimestamp TEXT',
+        );
+        await db.execute(
+          'ALTER TABLE nota_detalle_offline ADD COLUMN estado INTEGER',
+        );
       } catch (e) {
-        print('Error al migrar nota_detalle_offline a v11: $e. Recreando tabla.');
+        print(
+          'Error al migrar nota_detalle_offline a v11: $e. Recreando tabla.',
+        );
         await db.execute('DROP TABLE IF EXISTS nota_detalle_offline');
         await db.execute('''
           CREATE TABLE nota_detalle_offline (
@@ -332,6 +377,50 @@ class DatabaseHelper {
         ''');
       }
     }
+    // --- NUEVA MIGRACIÓN PARA v12: Añadir tipo_venta y tipo_producto ---
+    if (oldVersion < 12) {
+      // Usar TRY-CATCH para ALTER TABLE en caso de que la columna ya exista por alguna razón
+      try {
+        await db.execute(
+          'ALTER TABLE embarque_offline ADD COLUMN tipo_venta INTEGER NOT NULL DEFAULT 1',
+        );
+      } catch (e) {
+        print('Columna tipo_venta ya existe en embarque_offline o error: $e');
+      }
+      try {
+        await db.execute(
+          'ALTER TABLE embarque_detalle_offline ADD COLUMN tipo_producto TEXT NOT NULL DEFAULT "P"',
+        );
+      } catch (e) {
+        print(
+          'Columna tipo_producto ya existe en embarque_detalle_offline o error: $e',
+        );
+      }
+    }
+    // --- NUEVA MIGRACIÓN PARA v13: Añadir tipo_producto a nota_detalle_offline ---
+    if (oldVersion < 13) {
+      try {
+        await db.execute(
+          'ALTER TABLE nota_detalle_offline ADD COLUMN tipo_producto TEXT NOT NULL DEFAULT "P"',
+        );
+      } catch (e) {
+        print(
+          'Columna tipo_producto ya existe en nota_detalle_offline o error: $e',
+        );
+      }
+    }
+    // --- NUEVA MIGRACIÓN PARA v14: Añadir tipo_venta a embarques_consulta ---
+    if (oldVersion < 14) {
+      try {
+        // Añadir la columna tipo_venta a la tabla de cache de consultas de embarques.
+        // Usamos DEFAULT 1 para mantener compatibilidad con registros existentes.
+        await db.execute(
+          'ALTER TABLE embarques_consulta ADD COLUMN tipo_venta INTEGER DEFAULT 1',
+        );
+      } catch (e) {
+        print('Columna tipo_venta ya existe en embarques_consulta o error: $e');
+      }
+    }
   }
 
   // --- Empresa Info Methods ---
@@ -345,7 +434,7 @@ class DatabaseHelper {
       'telefono': empresaData['telefono'] ?? 'N/A',
     };
     await db.transaction((txn) async {
-      await txn.delete('empresa_info'); 
+      await txn.delete('empresa_info');
       await txn.insert('empresa_info', cleanData);
     });
   }
@@ -427,6 +516,7 @@ class DatabaseHelper {
         'idusuario': payload['idusuario'],
         'idalmacenista': payload['idalmacenista'],
         'idcliente': payload['idcliente'],
+        'tipo_venta': payload['tipo_venta'], // Nuevo campo
         'regtimestamp': DateTime.now().toIso8601String(),
         'synced': 0,
       };
@@ -443,6 +533,7 @@ class DatabaseHelper {
           'cantidad': cantidad,
           'preciounitario': precio,
           'subtotal': cantidad * precio,
+          'tipo_producto': detalle['tipo_producto'], // Nuevo campo
         };
         await txn.insert('embarque_detalle_offline', detalleRow);
       }
@@ -477,7 +568,11 @@ class DatabaseHelper {
     await db.transaction((txn) async {
       await txn.delete('precios_cat');
       for (final item in items) {
-        await txn.insert('precios_cat', item, conflictAlgorithm: ConflictAlgorithm.replace);
+        await txn.insert(
+          'precios_cat',
+          item,
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
       }
     });
   }
@@ -488,7 +583,11 @@ class DatabaseHelper {
     await db.transaction((txn) async {
       await txn.delete('notas_offline');
       for (final item in items) {
-        await txn.insert('notas_offline', item, conflictAlgorithm: ConflictAlgorithm.replace);
+        await txn.insert(
+          'notas_offline',
+          item,
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
       }
     });
   }
@@ -499,7 +598,11 @@ class DatabaseHelper {
     await db.transaction((txn) async {
       await txn.delete('nota_detalle_offline');
       for (final item in items) {
-        await txn.insert('nota_detalle_offline', item, conflictAlgorithm: ConflictAlgorithm.replace);
+        await txn.insert(
+          'nota_detalle_offline',
+          item,
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
       }
     });
   }
@@ -510,7 +613,11 @@ class DatabaseHelper {
     await db.transaction((txn) async {
       await txn.delete('pagos_offline');
       for (final item in items) {
-        await txn.insert('pagos_offline', item, conflictAlgorithm: ConflictAlgorithm.replace);
+        await txn.insert(
+          'pagos_offline',
+          item,
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
       }
     });
   }
@@ -538,6 +645,7 @@ class DatabaseHelper {
     final db = await database;
     if (db == null) return null;
 
+    // 1. Intentar precio específico
     final List<Map<String, dynamic>> maps = await db.query(
       'precios_cat',
       columns: ['preciounitario'],
@@ -548,6 +656,20 @@ class DatabaseHelper {
     if (maps.isNotEmpty) {
       return maps.first['preciounitario'] as double?;
     }
+
+    // 2. Fallback: Intentar precio de "MOSTRADOR" (ID 91)
+    // Esto replica la lógica del servidor (api_precios.php) para funcionamiento offline
+    final List<Map<String, dynamic>> mapsMostrador = await db.query(
+      'precios_cat',
+      columns: ['preciounitario'],
+      where: 'idcliente = ? AND idproducto = ? AND idunidad = ?',
+      whereArgs: [91, idProducto, idUnidad],
+    );
+
+    if (mapsMostrador.isNotEmpty) {
+      return mapsMostrador.first['preciounitario'] as double?;
+    }
+
     return null;
   }
 
@@ -595,6 +717,8 @@ class DatabaseHelper {
       'idusuario': header['idusuario'],
       'idalmacenista': header['idalmacenista'],
       'idcliente': header['idcliente'],
+      'tipo_venta':
+          header['tipo_venta'], // Nuevo: para el payload de sincronización
       'detalles': details
           .map(
             (d) => {
@@ -602,6 +726,8 @@ class DatabaseHelper {
               'idunidad': d['idunidad'],
               'cantidad': d['cantidad'],
               'preciounitario': d['preciounitario'],
+              'tipo_producto':
+                  d['tipo_producto'], // Nuevo: para el payload de sincronización
             },
           )
           .toList(),
@@ -646,6 +772,27 @@ class DatabaseHelper {
     );
   }
 
+  Future<void> updatePagosToNewNoteId(int oldLocalId, int newServerId) async {
+    final db = await database;
+    if (db == null) return;
+    await db.update(
+      'pagos_por_sincronizar',
+      {'idnota': newServerId},
+      where: 'idnota = ?',
+      whereArgs: [oldLocalId],
+    );
+  }
+
+  Future<void> deletePagoPorSincronizar(int idLocal) async {
+    final db = await database;
+    if (db == null) return;
+    await db.delete(
+      'pagos_por_sincronizar',
+      where: 'id_pago_local = ?',
+      whereArgs: [idLocal],
+    );
+  }
+
   // --- Notas Offline Methods (Cache) ---
 
   Future<int> insertNotaOffline(Map<String, dynamic> notaMap) async {
@@ -674,10 +821,30 @@ class DatabaseHelper {
     });
   }
 
-  Future<List<Map<String, dynamic>>> getNotasOffline() async {
+  Future<List<Map<String, dynamic>>> getNotasOffline({
+    String? tipoProducto,
+  }) async {
     final db = await database;
     if (db == null) return [];
-    return await db.query('notas_offline', orderBy: 'regtimestamp DESC');
+
+    String sql = '''
+      SELECT 
+        n.*
+      FROM notas_offline AS n
+    ''';
+    List<dynamic> whereArgs = [];
+
+    if (tipoProducto != null) {
+      sql += '''
+        JOIN nota_detalle_offline AS nd ON n.idnota = nd.idnota_fk
+        WHERE nd.tipo_producto = ?
+      ''';
+      whereArgs.add(tipoProducto);
+    }
+    sql +=
+        ' GROUP BY n.idnota ORDER BY n.regtimestamp DESC'; // Agrupar para evitar duplicados
+
+    return await db.rawQuery(sql, whereArgs);
   }
 
   Future<List<Map<String, dynamic>>> getClientesConSaldo() async {
@@ -722,6 +889,21 @@ class DatabaseHelper {
     if (db == null) return [];
     return await db.query(
       'nota_detalle_offline',
+      columns: [
+        'iddetalle',
+        'idnota_fk',
+        'idproducto',
+        'idunidad',
+        'cantidad',
+        'precio',
+        'total',
+        'idestatus',
+        'nombreproducto',
+        'nombreunidad',
+        'tipo_producto', // Nuevo campo
+        'regtimestamp',
+        'estado',
+      ],
       where: 'idnota_fk = ?',
       whereArgs: [idnota],
     );
@@ -790,7 +972,9 @@ class DatabaseHelper {
 
   /// Busca el pago más reciente para una nota, buscando tanto en los pagos
   /// ya sincronizados como en los que están pendientes por subir.
-  Future<Map<String, dynamic>?> getLatestPagoForNotaIncludingPending(int idnota) async {
+  Future<Map<String, dynamic>?> getLatestPagoForNotaIncludingPending(
+    int idnota,
+  ) async {
     final db = await database;
     if (db == null) return null;
 
@@ -802,7 +986,9 @@ class DatabaseHelper {
       orderBy: 'regtimestamp DESC',
       limit: 1,
     );
-    Map<String, dynamic>? latestSynced = syncedMaps.isNotEmpty ? syncedMaps.first : null;
+    Map<String, dynamic>? latestSynced = syncedMaps.isNotEmpty
+        ? syncedMaps.first
+        : null;
 
     // 2. Obtener el último pago de la tabla de pendientes
     final List<Map<String, dynamic>> pendingMaps = await db.query(
@@ -812,7 +998,9 @@ class DatabaseHelper {
       orderBy: 'regtimestamp DESC',
       limit: 1,
     );
-    Map<String, dynamic>? latestPending = pendingMaps.isNotEmpty ? pendingMaps.first : null;
+    Map<String, dynamic>? latestPending = pendingMaps.isNotEmpty
+        ? pendingMaps.first
+        : null;
 
     // 3. Comparar y devolver el más reciente
     if (latestSynced == null && latestPending == null) {
@@ -824,7 +1012,8 @@ class DatabaseHelper {
     if (latestSynced == null && latestPending != null) {
       // Solo hay pendientes, normalizar el mapa antes de devolver
       return {
-        'idpago': latestPending['id_pago_local'], // Usar id local como referencia
+        'idpago':
+            latestPending['id_pago_local'], // Usar id local como referencia
         'idnota': latestPending['idnota'],
         'monto': latestPending['monto'],
         'tipo_pago': latestPending['tipo_pago'],
@@ -834,11 +1023,13 @@ class DatabaseHelper {
 
     // Si hay ambos, comparar por fecha
     final syncedDate = DateTime.parse(latestSynced!['regtimestamp'] as String);
-    final pendingDate = DateTime.parse(latestPending!['regtimestamp'] as String);
+    final pendingDate = DateTime.parse(
+      latestPending!['regtimestamp'] as String,
+    );
 
     if (pendingDate.isAfter(syncedDate)) {
       // El pendiente es más nuevo, normalizar y devolver
-       return {
+      return {
         'idpago': latestPending['id_pago_local'],
         'idnota': latestPending['idnota'],
         'monto': latestPending['monto'],
@@ -890,6 +1081,7 @@ class DatabaseHelper {
         int idalmacen;
         int idusuario;
         int idalmacenista;
+        int tipoVenta; // Nuevo
 
         if (e is Map<String, dynamic>) {
           idfolioembarque = e['idfolioembarque'] as int;
@@ -904,18 +1096,20 @@ class DatabaseHelper {
           idalmacen = e['idalmacen'] as int;
           idusuario = e['idusuario'] as int;
           idalmacenista = e['idalmacenista'] as int;
+          tipoVenta = e['tipo_venta'] as int; // Nuevo
         } else {
           // asumimos modelo EmbarqueConsulta
           idfolioembarque = e.idfolioembarque as int;
           regtimestamp = e.regtimestamp as String;
-          nombreCliente = e.nombre_cliente as String;
+          nombreCliente = e.nombreCliente as String;
           nombreUsuario = e.nombreusuario as String;
-          nombreAlmacenista = e.nombre_almacenista as String;
+          nombreAlmacenista = e.nombreAlmacenista as String;
           estadoEmbarque = e.esActivo == true ? 1 : 0;
           idcliente = e.idcliente as int;
           idalmacen = e.idalmacen as int;
           idusuario = e.idusuario as int;
           idalmacenista = e.idalmacenista as int;
+          tipoVenta = e.tipoVenta as int; // Nuevo
         }
 
         await txn.insert('embarques_consulta', {
@@ -930,6 +1124,7 @@ class DatabaseHelper {
           'idalmacen': idalmacen,
           'idusuario': idusuario,
           'idalmacenista': idalmacenista,
+          'tipo_venta': tipoVenta, // Nuevo
         }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
     });
@@ -990,6 +1185,7 @@ class DatabaseHelper {
     final int idusuario = header['idusuario'] as int;
     final int idalmacenista = header['idalmacenista'] as int;
     final String regtimestamp = header['regtimestamp'] as String;
+    final int tipoVenta = header['tipo_venta'] as int; // Nuevo
 
     // fecha_filtro = solo la fecha (igual que haces en la pantalla)
     final String fechaFiltro = regtimestamp.split('T').first;
@@ -1037,6 +1233,7 @@ class DatabaseHelper {
       'idalmacen': idalmacen,
       'idusuario': idusuario,
       'idalmacenista': idalmacenista,
+      'tipo_venta': tipoVenta, // Nuevo
     }, conflictAlgorithm: ConflictAlgorithm.replace);
 
     // 4. marcar como sincronizado (o lo borras si quieres)
